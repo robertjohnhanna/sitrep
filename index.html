@@ -170,9 +170,10 @@
     max-height:120px;overflow:auto}
   .pop .lnk{margin-top:7px;font-size:11px}
 
-  /* ---------- toasts / legend ---------- */
-  #toast{position:absolute;bottom:calc(44px + var(--sa-b));left:calc(12px + var(--sa-l));
-    z-index:25;max-width:270px;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+  /* ---------- toasts ---------- */
+  #toast{position:absolute;top:calc(var(--topbar-h) + 10px);left:50%;transform:translateX(-50%);
+    z-index:25;max-width:min(320px,86vw);display:flex;flex-direction:column;gap:6px;
+    align-items:center;pointer-events:none}
   .tmsg{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
     padding:8px 11px;border-radius:8px;font-size:11px;color:var(--ink);animation:sl .25s ease}
   .tmsg.err{border-left-color:var(--danger)}
@@ -181,9 +182,33 @@
   .spin{display:inline-block;width:9px;height:9px;border:2px solid #2a3a4d;
     border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
-  #legend{position:absolute;bottom:calc(12px + var(--sa-b));left:calc(12px + var(--sa-l));
-    z-index:14;font-size:10px;color:var(--ink-dim);
-    background:#0a0e14aa;padding:4px 9px;border-radius:6px;border:1px solid var(--line)}
+  /* ---------- SITREP briefing card ---------- */
+  #sitrep{bottom:calc(12px + var(--sa-b));left:50%;margin-left:-195px;width:390px;
+    max-height:44vh;top:auto}
+  #sit-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;
+    border-bottom:1px solid var(--line);flex:0 0 auto;min-height:40px}
+  #sit-head b{color:var(--accent);font-size:12px;letter-spacing:.8px}
+  #sit-head .loc{flex:1;min-width:0;color:var(--ink);font-size:11px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;text-align:right}
+  #sit-head .chev{color:var(--ink-dim);transition:transform .2s}
+  #sitrep.collapsed .chev{transform:rotate(180deg)}
+  #sitrep.collapsed #sit-body{display:none}
+  #sit-body{overflow-y:auto;padding:4px 0;-webkit-overflow-scrolling:touch}
+  .sit-row{display:flex;align-items:center;gap:9px;padding:6px 12px;font-size:11px;min-height:32px}
+  .sit-row .ic{flex:0 0 18px;text-align:center}
+  .sit-row .tx{flex:1;min-width:0;line-height:1.4}
+  .sit-row .tx s1{display:block;color:var(--ink)}
+  .sit-row .tx s2{display:block;color:var(--ink-dim);font-size:10px}
+  .sit-row .act{flex:0 0 auto;background:var(--panel2);border:1px solid var(--accent);
+    color:var(--accent);border-radius:14px;padding:4px 11px;font-size:10px;cursor:pointer;
+    letter-spacing:.5px;min-height:28px}
+  .sit-row .act:active{background:var(--accent);color:#06231e}
+  .sit-row.alert s1{color:var(--warn)}
+  .sit-row.danger s1{color:var(--danger)}
+  .sit-empty{padding:14px 12px;font-size:11px;color:var(--ink-dim);line-height:1.5}
+  #user-dot{width:16px;height:16px;border-radius:50%;background:var(--accent);
+    border:2.5px solid #fff;box-shadow:0 0 0 0 rgba(55,224,201,.55);animation:pulse 2.2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(55,224,201,.55)}70%{box-shadow:0 0 0 16px rgba(55,224,201,0)}100%{box-shadow:0 0 0 0 rgba(55,224,201,0)}}
 
   /* ---------- mobile bottom navigation + sheets ---------- */
   #mnav{display:none}
@@ -206,11 +231,11 @@
     .sheet-grip{display:block;flex:0 0 auto;padding:8px 0 2px;cursor:grab}
     .sheet-grip::before{content:"";display:block;width:38px;height:4px;border-radius:2px;
       background:#2a3a4d;margin:0 auto}
-    #legend{display:none}
     #brand small{display:none}
     #topbar{gap:8px}
     .badges{max-width:46vw}
-    #toast{bottom:calc(66px + var(--sa-b))}
+    #sitrep{width:auto!important;margin-left:0!important;left:0!important;
+      bottom:calc(54px + var(--sa-b))!important;max-height:64vh!important}
     .maplibregl-ctrl-bottom-right{bottom:calc(58px + var(--sa-b))}
   }
   @media (max-width:520px){
@@ -300,15 +325,30 @@
   </div>
 </div>
 
+<!-- SITREP briefing card -->
+<div id="sitrep" class="panel">
+  <div class="sheet-grip" data-close="sitrep"></div>
+  <div id="sit-head">
+    <b>◈ SITREP</b>
+    <span class="loc" id="sit-loc">locating…</span>
+    <span class="chev">▾</span>
+  </div>
+  <div id="sit-body">
+    <div class="sit-empty">Acquiring position and signals…<br>
+    Location is resolved by IP instantly, then refined by GPS if you allow it.
+    Nothing leaves your browser.</div>
+  </div>
+</div>
+
 <!-- mobile bottom navigation -->
 <div id="mnav">
   <button data-p="" class="active"><span class="ic">🗺</span>MAP</button>
+  <button data-p="sitrep"><span class="ic">◈</span>SITREP</button>
   <button data-p="layers"><span class="ic">◧</span>LAYERS</button>
   <button data-p="radio"><span class="ic">📡</span>RADIO</button>
 </div>
 
 <div id="toast"></div>
-<div id="legend">right-click a point → dossier · scroll to zoom</div>
 
 <script>
 "use strict";
@@ -336,6 +376,31 @@ async function getText(url,opts={}){
   finally{ clearTimeout(to); }
 }
 const fmtTime = ts => new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+// great-circle distance, km
+function havKm(lat1,lon1,lat2,lon2){
+  const R=6371,d=Math.PI/180;
+  const a=Math.sin((lat2-lat1)*d/2)**2+
+    Math.cos(lat1*d)*Math.cos(lat2*d)*Math.sin((lon2-lon1)*d/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+const fmtKm = km => km<1?Math.round(km*1000)+' m':km<100?km.toFixed(1)+' km':Math.round(km)+' km';
+// nearest feature (Point geometry) in a layer's current data to a lat/lon
+function nearestIn(srcId,lat,lon){
+  const s=gl.getSource(srcId); if(!s||!s._data) return null;
+  let best=null,bd=Infinity;
+  (s._data.features||[]).forEach(f=>{
+    if(!f.geometry||f.geometry.type!=='Point') return;
+    const [flon,flat]=f.geometry.coordinates;
+    const dkm=havKm(lat,lon,flat,flon);
+    if(dkm<bd){bd=dkm;best={f,km:dkm};}
+  });
+  return best;
+}
+function countWithin(srcId,lat,lon,km){
+  const s=gl.getSource(srcId); if(!s||!s._data) return 0;
+  return (s._data.features||[]).filter(f=>f.geometry&&f.geometry.type==='Point'&&
+    havKm(lat,lon,f.geometry.coordinates[1],f.geometry.coordinates[0])<=km).length;
+}
 const escapeHtml = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // WMO weather codes (Open-Meteo) -> label
 const WMO={0:'clear',1:'mostly clear',2:'partly cloudy',3:'overcast',45:'fog',48:'rime fog',
@@ -365,8 +430,11 @@ const gl = new maplibregl.Map({
 });
 gl.addControl(new maplibregl.AttributionControl({compact:true}));
 gl.addControl(new maplibregl.NavigationControl({showCompass:false}),'bottom-right');
-gl.addControl(new maplibregl.GeolocateControl({trackUserLocation:false}),'bottom-right');
+const geoCtl=new maplibregl.GeolocateControl({trackUserLocation:false,
+  positionOptions:{enableHighAccuracy:true}});
+gl.addControl(geoCtl,'bottom-right');
 try{ gl.setProjection && gl.setProjection({type:'globe'}); }catch(e){/* flat fallback */}
+window.__seehear={map:gl}; // debug/test handle
 
 /* =====================================================================
    2. LAYER DEFINITIONS
@@ -378,6 +446,8 @@ try{ gl.setProjection && gl.setProjection({type:'globe'}); }catch(e){/* flat fal
    ===================================================================== */
 const LAYERS=[];
 const defLayer=c=>LAYERS.push(c);
+// user position state — filled by IP geolocation instantly, refined by GPS
+const USER={lat:null,lon:null,place:'',region:'',cc:'',src:null};
 
 /* ---------------- Movement ---------------- */
 defLayer({
@@ -412,6 +482,26 @@ defLayer({
     <div class="kv"><span>speed</span>${p.spd} kt</div>
     <div class="kv"><span>squawk</span>${escapeHtml(p.sq||'—')}</div>
     <div class="kv"><span>hex</span>${escapeHtml(p.hex)}</div>`
+});
+
+defLayer({
+  id:'nearair', label:'Aircraft near me', color:'#5cc8ff', group:'move', refresh:45, defaultOff:true,
+  // all civil+mil traffic within 100 nm of the user — auto-enabled once located
+  loader: async ()=>{
+    if(USER.lat==null) throw new Error('no position fix yet');
+    const j=await getJSON(`https://api.adsb.lol/v2/point/${USER.lat.toFixed(3)}/${USER.lon.toFixed(3)}/100`);
+    const ac=(j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null);
+    return {type:'FeatureCollection',features:ac.map(a=>({
+      type:'Feature',geometry:{type:'Point',coordinates:[a.lon,a.lat]},
+      properties:{_kind:'nearair',flight:String(a.flight||a.r||a.hex||'?').trim(),
+        type:a.t||'?',alt:a.alt_baro??a.alt_geom??'?',spd:a.gs!=null?Math.round(a.gs):'?',
+        km:Math.round(havKm(USER.lat,USER.lon,a.lat,a.lon))}}))};
+  },
+  popup:p=>`<h4>✈ ${escapeHtml(p.flight)}</h4>
+    <div class="kv"><span>type</span>${escapeHtml(p.type)}</div>
+    <div class="kv"><span>alt</span>${p.alt} ft</div>
+    <div class="kv"><span>speed</span>${p.spd} kt</div>
+    <div class="kv"><span>range</span>${p.km} km from you</div>`
 });
 
 defLayer({
@@ -871,6 +961,7 @@ async function loadKp(){
       const n=parseFloat(v); if(isFinite(n)){kp=n;break;}
     }
     if(kp==null) throw new Error('no data');
+    KP=kp;
     $('#kp-val').textContent=kp.toFixed(1);
     const col=kp>=7?'#ff5c6c':kp>=5?'#ffcb47':'#4be08a';
     const dot=$('#kp-dot'); dot.style.background=col; dot.style.boxShadow='0 0 6px '+col;
@@ -903,6 +994,213 @@ async function loadKEV(){
 }
 setInterval(()=>{ $('#utc').textContent=new Date().toISOString().slice(11,16); },1000);
 $('#utc').textContent=new Date().toISOString().slice(11,16);
+let KP=null; // cached for the SITREP aurora hint
+
+/* =====================================================================
+   6b. LOCATION + SITREP — the "at a glance" intelligence layer
+   Fix chain: ipwho.is (instant, keyless, no prompt) -> browser GPS
+   refine (one prompt; denial silently keeps the IP fix). Everything
+   is computed client-side; position never leaves the browser except
+   as anonymous lat/lon query params to the public weather APIs.
+   ===================================================================== */
+let userMarker=null, sitrepTimer=null, wxCache={t:0}, alertCache={t:0};
+
+async function locate(){
+  try{
+    const j=await getJSON('https://ipwho.is/',{timeout:9000});
+    if(j&&j.success!==false&&j.latitude!=null)
+      setUserFix(j.latitude,j.longitude,'ip',
+        {place:j.city,region:j.region,rc:j.region_code,cc:j.country_code});
+  }catch(e){ console.warn('[ip-locate]',e.message); }
+  if(navigator.geolocation){
+    try{
+      navigator.geolocation.getCurrentPosition(
+        pos=>setUserFix(pos.coords.latitude,pos.coords.longitude,'gps',null),
+        ()=>{},{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
+    }catch(e){}
+  }
+  if(USER.lat==null) $('#sit-loc').textContent='no fix — tap ⌖ on the map';
+}
+geoCtl.on('geolocate',p=>setUserFix(p.coords.latitude,p.coords.longitude,'gps',null));
+
+function setUserFix(lat,lon,src,meta){
+  const first=USER.lat==null;
+  if(!first&&src==='ip'&&USER.src==='gps') return; // never downgrade gps -> ip
+  USER.lat=lat; USER.lon=lon; USER.src=src;
+  if(meta){USER.place=meta.place||'';USER.region=meta.region||'';
+    USER.rc=meta.rc||'';USER.cc=meta.cc||'';}
+  if(!userMarker){
+    const d=el('div'); d.id='user-dot';
+    userMarker=new maplibregl.Marker({element:d}).setLngLat([lon,lat]).addTo(gl);
+  } else userMarker.setLngLat([lon,lat]);
+  gl.flyTo({center:[lon,lat],zoom:src==='gps'?9.5:7.5,speed:1.5});
+  $('#sit-loc').textContent=(USER.place?USER.place+', ':'')+
+    (USER.rc||USER.region||USER.cc||lat.toFixed(2)+', '+lon.toFixed(2))+
+    ' · '+src.toUpperCase();
+  if(src==='gps'&&!meta) reverseFill();
+  if(first) afterFirstFix();
+  sitrepTick();
+}
+
+async function reverseFill(){
+  try{
+    const g=await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${USER.lat}&lon=${USER.lon}&zoom=10`,
+      {headers:{'Accept-Language':'en'}});
+    const a=g.address||{};
+    USER.place=a.city||a.town||a.village||a.county||g.name||'';
+    USER.region=a.state||''; USER.cc=(a.country_code||'').toUpperCase();
+    $('#sit-loc').textContent=(USER.place?USER.place+', ':'')+
+      (USER.region||USER.cc)+' · GPS';
+    autoTune();
+  }catch(e){}
+}
+
+function afterFirstFix(){
+  // switch on the aircraft-near-me layer now that a radius exists
+  const ck=$('#ck-nearair');
+  if(ck&&!ck.checked){ ck.checked=true; ck.dispatchEvent(new Event('change')); }
+  autoTune();
+  if(!sitrepTimer) sitrepTimer=setInterval(sitrepTick,60000);
+}
+
+// Auto-tune OpenMHz to the closest-matching system for the user's area.
+// The systems feed has no coordinates, so match name/state/city text
+// against the geolocated city + region. Only fires if nothing is tuned.
+let autoTuned=false;
+function autoTune(){
+  if(autoTuned||mhzCur||!mhzSystems.length||USER.lat==null) return;
+  const want=[USER.place,USER.region,USER.rc].filter(Boolean).map(s=>s.toLowerCase());
+  if(!want.length) return;
+  let best=null,bs=0;
+  mhzSystems.forEach(s=>{
+    const hay=((s.name||'')+' '+(s.state||'')+' '+(s.city||'')+' '+(s.county||'')).toLowerCase();
+    let score=0;
+    want.forEach((w,i)=>{ if(w&&hay.includes(w)) score+=(i===0?3:i===1?2:2); });
+    if(score>bs){bs=score;best=s;}
+  });
+  if(best&&bs>=2){
+    autoTuned=true;
+    $('#mhz-sys').value=best.shortName;
+    selectSystem(best.shortName);
+    toast('📟 auto-tuned: '+(best.name||best.shortName),'');
+  }
+}
+
+async function sitrepTick(){
+  if(USER.lat==null) return;
+  const {lat,lon}=USER;
+  const rows=[];
+  const row=(cls,ic,l1,l2,act)=>rows.push(
+    `<div class="sit-row${cls?' '+cls:''}"><span class="ic">${ic}</span>`+
+    `<span class="tx"><s1>${l1}</s1>${l2?`<s2>${l2}</s2>`:''}</span>${act||''}</div>`);
+
+  // -- active alerts covering the exact point (NWS = US only) --
+  if(Date.now()-alertCache.t>120000){
+    alertCache={t:Date.now(),d:null};
+    try{ alertCache.d=await getJSON(`https://api.weather.gov/alerts/active?point=${lat.toFixed(3)},${lon.toFixed(3)}`,{timeout:10000}); }catch(e){}
+  }
+  const al=alertCache.d&&alertCache.d.features;
+  if(al&&al.length){
+    const a=al[0].properties;
+    row('danger','⚠',escapeHtml(a.event),
+      al.length>1?('+ '+(al.length-1)+' more alerts at your position'):escapeHtml(String(a.headline||'').slice(0,60)));
+  } else if(USER.cc==='US'||!USER.cc){
+    row('','✓','no weather alerts at your position','NWS point query');
+  }
+
+  // -- local conditions --
+  if(Date.now()-wxCache.t>600000){
+    wxCache={t:Date.now(),d:null};
+    try{ const w=await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,wind_speed_10m,weather_code`);
+      wxCache.d=w.current; }catch(e){}
+  }
+  if(wxCache.d) row('','🌦',
+    wxCache.d.temperature_2m+'°C · '+Math.round(wxCache.d.wind_speed_10m)+' km/h · '+(WMO[wxCache.d.weather_code]||''),
+    'local conditions');
+
+  // -- air picture --
+  const near=gl.getSource('src-nearair');
+  const nearN=near&&near._data?(near._data.features||[]).length:0;
+  if(nearN){
+    const nn=nearestIn('src-nearair',lat,lon);
+    row('','✈',nearN+' aircraft within 100 nm',
+      nn?('closest: '+escapeHtml(nn.f.properties.flight)+' · '+fmtKm(nn.km)+' · '+nn.f.properties.alt+' ft'):'' ,
+      `<button class="act" data-act="fly" data-ll="${nn?nn.f.geometry.coordinates.join(','):''}">VIEW</button>`);
+  }
+  const milN=countWithin('src-mil',lat,lon,300);
+  if(milN){
+    const nm=nearestIn('src-mil',lat,lon);
+    row('alert','🎖',milN+' military aircraft within 300 km',
+      nm?('closest: '+escapeHtml(nm.f.properties.flight)+' · '+fmtKm(nm.km)):'',
+      nm?`<button class="act" data-act="fly" data-ll="${nm.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
+  }
+  const sosSrc=gl.getSource('src-sos');
+  const sosN=sosSrc&&sosSrc._data?(sosSrc._data.features||[]).length:0;
+  if(sosN){
+    const ns=nearestIn('src-sos',lat,lon);
+    row('danger','🚨',sosN+' emergency squawk'+(sosN>1?'s':'')+' worldwide',
+      ns?('nearest: '+escapeHtml(ns.f.properties.flight)+' ('+ns.f.properties.code+') · '+fmtKm(ns.km)):'',
+      ns?`<button class="act" data-act="fly" data-ll="${ns.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
+  }
+
+  // -- ground truth --
+  const nq=nearestIn('src-quakes',lat,lon);
+  if(nq) row(nq.km<300?'alert':'','🌍',
+    'M'+nq.f.properties.mag+' quake · '+fmtKm(nq.km)+' away',
+    escapeHtml(String(nq.f.properties.place||''))+' · '+fmtTime(nq.f.properties.time),
+    `<button class="act" data-act="fly" data-ll="${nq.f.geometry.coordinates.slice(0,2).join(',')}">VIEW</button>`);
+  const ne=nearestIn('src-eonet',lat,lon);
+  if(ne&&ne.km<1500) row(ne.km<200?'alert':'','🔥',
+    escapeHtml(ne.f.properties.cat)+' · '+fmtKm(ne.km)+' away',
+    escapeHtml(String(ne.f.properties.title||'').slice(0,60)),
+    `<button class="act" data-act="fly" data-ll="${ne.f.geometry.coordinates.join(',')}">VIEW</button>`);
+
+  // -- audio picture --
+  if(mhzCur){
+    const s=mhzSystems.find(x=>x.shortName===mhzCur);
+    row('','📟','monitoring: '+escapeHtml(s?(s.name||mhzCur):mhzCur),
+      autoTuned?'auto-tuned to your area · police/fire':'police/fire trunked audio');
+  } else if(mhzSystems.length){
+    row('','📟',mhzSystems.length+' police/fire systems available','open RADIO → pick or scan');
+  }
+  const na=nearestIn('src-atc',lat,lon);
+  if(na) row('','🛬','ATC: '+escapeHtml(na.f.properties.name)+' · '+fmtKm(na.km),
+    escapeHtml(na.f.properties.icao)+' tower — live controller audio',
+    `<button class="act" data-act="atc" data-icao="${escapeHtml(na.f.properties.icao)}">LISTEN</button>`);
+  const nk=nearestIn('src-kiwi',lat,lon);
+  if(nk) row('','📻','HF radio: '+escapeHtml(nk.f.properties.name)+' · '+fmtKm(nk.km),
+    'shortwave receiver 0–30 MHz',
+    `<button class="act" data-act="kiwi" data-host="${escapeHtml(nk.f.properties.host)}">OPEN</button>`);
+
+  // -- space weather hint --
+  if(KP!=null&&KP>=5&&Math.abs(lat)>=48)
+    row('alert','🌌','aurora possible at your latitude tonight','Kp '+KP+' geomagnetic storm in progress');
+
+  $('#sit-body').innerHTML=rows.length?rows.join(''):
+    '<div class="sit-empty">No signals resolved yet — feeds are still loading.</div>';
+}
+
+// SITREP action chips
+$('#sit-body').addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return;
+  const act=b.dataset.act;
+  if(act==='fly'&&b.dataset.ll){
+    const [lon,lat]=b.dataset.ll.split(',').map(Number);
+    if(isFinite(lon)&&isFinite(lat)) gl.flyTo({center:[lon,lat],zoom:9});
+    if(window.matchMedia('(max-width:900px)').matches) openSheet('');
+  }
+  if(act==='atc'){
+    const a=LIVEATC.find(x=>x.icao===b.dataset.icao);
+    const r=document.querySelector(`#atc-list .rrow[data-icao="${b.dataset.icao}"]`);
+    if(a&&r) playATC(a,r);
+  }
+  if(act==='kiwi'&&b.dataset.host) window.open('http://'+b.dataset.host,'_blank','noopener');
+});
+$('#sit-head').addEventListener('click',()=>{
+  // collapse toggle on desktop; on mobile the sheet grip handles closing
+  if(!window.matchMedia('(max-width:900px)').matches)
+    $('#sitrep').classList.toggle('collapsed');
+});
 
 /* =====================================================================
    7. RADIO DOMAIN 1 — OpenMHz police / fire (THE CORE FEATURE)
@@ -927,6 +1225,7 @@ async function loadSystems(){
       sel.appendChild(o);
     });
     $('#mhz-status').textContent=mhzSystems.length+' systems · pick one to start scanning';
+    autoTune(); // if a position fix already exists, tune the local system now
   }catch(e){
     $('#mhz-sys').innerHTML='<option>systems unavailable</option>';
     $('#mhz-status').innerHTML='<span style="color:var(--danger)">OpenMHz API blocked ('+
@@ -1175,7 +1474,7 @@ document.querySelectorAll('#radio-tabs button').forEach(b=>{
 // mobile: MAP / LAYERS / RADIO bottom nav toggles the panels as sheets
 const mnavBtns=document.querySelectorAll('#mnav button');
 function openSheet(which){
-  ['layers','radio'].forEach(id=>$('#'+id).classList.toggle('open',id===which));
+  ['layers','radio','sitrep'].forEach(id=>$('#'+id).classList.toggle('open',id===which));
   mnavBtns.forEach(b=>b.classList.toggle('active',b.dataset.p===which));
 }
 mnavBtns.forEach(b=>b.addEventListener('click',()=>openSheet(b.dataset.p)));
@@ -1288,6 +1587,7 @@ gl.on('load',()=>{
   loadKp();     setInterval(loadKp,120000);
   loadXray();   setInterval(loadXray,120000);
   loadKEV();
+  locate();
   toast('seehear online · 3 audio domains · '+LAYERS.length+' live feeds','');
 });
 </script>

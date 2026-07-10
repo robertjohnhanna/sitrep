@@ -21,12 +21,36 @@ open index.html      # or just double-click it
 MapLibre GL and satellite.js load from CDN; every data feed is fetched
 client-side from keyless public APIs. Nothing is installed or served.
 
+## SITREP — situational awareness at a glance
+
+On load, seehear locates you (instant IP fix via ipwho.is, refined by GPS if
+you allow the browser prompt — denial is silently tolerated), flies the map to
+your position, drops a pulsing marker, and builds a live **SITREP briefing**
+that refreshes every 60 s:
+
+- ⚠ active weather alerts covering your exact point (NWS point query)
+- 🌦 local conditions (Open-Meteo)
+- ✈ every aircraft within 100 nm of you (auto-enabled layer, adsb.lol)
+- 🎖 military aircraft within 300 km, with closest callsign
+- 🚨 aircraft squawking 7700/7600/7500 worldwide, with distance to nearest
+- 🌍 nearest earthquake and 🔥 nearest natural event, with distances
+- 📟 **auto-tuned police/fire audio** — the OpenMHz system matching your
+  city/region starts monitoring automatically
+- 🛬 nearest ATC tower with a one-tap LISTEN chip
+- 📻 nearest shortwave receiver with a one-tap OPEN chip
+- 🌌 aurora-visibility hint when Kp ≥ 5 at your latitude
+
+Every row has a VIEW/LISTEN/OPEN action. Position is resolved client-side and
+never leaves the browser except as anonymous lat/lon parameters to the public
+weather APIs.
+
 ## Live map layers
 
 | Group | Layer | Source | Refresh |
 |---|---|---|---|
 | Movement | Earthquakes (24 h, M2.5+) | USGS | 60 s |
 | | Military aircraft | adsb.lol ADS-B | 60 s |
+| | Aircraft near me (100 nm radius) | adsb.lol point query | 45 s |
 | | Emergency squawks (7700/7600/7500) | adsb.lol | 60 s |
 | | ISS live position | wheretheiss.at | 15 s |
 | | Bright satellites + GPS constellation | CelesTrak TLE → SGP4 propagated in-browser | 60–120 s |
