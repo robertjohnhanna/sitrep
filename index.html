@@ -156,6 +156,39 @@
   .note{font-size:10px;color:var(--ink-dim);padding:9px 12px;line-height:1.55;
     background:#0c141d;flex:0 0 auto}
 
+  /* ---------- KiwiSDR tuner ---------- */
+  #tuner{flex:0 0 auto;padding:11px 12px;border-bottom:1px solid var(--line);
+    background:#0c141d}
+  #tuner-node{font-size:11px;color:var(--accent);margin-bottom:8px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  #tuner-freq-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  #t-freq{flex:1;min-width:0;background:#08111a;border:1px solid var(--line);color:var(--accent2);
+    font-family:var(--mono);font-size:20px;font-weight:700;text-align:center;padding:6px 4px;
+    border-radius:8px;-webkit-appearance:none}
+  #t-freq:focus{outline:none;border-color:var(--accent)}
+  #t-unit{color:var(--ink-dim);font-size:11px}
+  .tbtn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;width:34px;height:38px;font-size:18px;flex:0 0 auto}
+  .tbtn:active{background:var(--accent);color:#06231e}
+  #tuner-modes{display:flex;gap:5px;margin-bottom:8px}
+  .mbtn{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim);
+    border-radius:7px;padding:6px 0;font-size:11px;min-height:32px}
+  .mbtn.on{border-color:var(--accent);color:var(--accent)}
+  #tuner-bands{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}
+  .bband{background:#101c28;border:1px solid var(--line);color:var(--ink-dim);
+    border-radius:12px;padding:4px 9px;font-size:10px;min-height:28px}
+  .bband:active,.bband.on{border-color:var(--accent2);color:var(--accent2)}
+  #smeter-wrap{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  #smeter{flex:1;height:8px;border-radius:4px;background:#101c28;overflow:hidden;
+    border:1px solid var(--line)}
+  #smeter::after{content:"";display:block;height:100%;width:var(--s,0%);
+    background:linear-gradient(90deg,#4be08a,#ffcb47,#ff5c6c);transition:width .12s}
+  #smeter-val{font-size:10px;color:var(--ink-dim);min-width:44px;text-align:right}
+  #tuner-ctl{display:flex;gap:6px;margin-bottom:6px}
+  #tuner-ctl .btn{flex:1;text-align:center}
+  #t-connect.live{border-color:var(--ok);color:var(--ok)}
+  #tuner-status{font-size:10px;color:var(--ink-dim);line-height:1.4;min-height:13px}
+
   /* ---------- popups ---------- */
   .maplibregl-popup-content{background:var(--panel);color:var(--ink);
     border:1px solid var(--line);border-radius:10px;font-family:var(--mono);
@@ -284,9 +317,10 @@
 <div id="radio" class="panel">
   <div class="sheet-grip" data-close="radio"></div>
   <div id="radio-tabs">
-    <button data-t="police" class="active">POLICE/FIRE</button>
-    <button data-t="hf">SHORTWAVE</button>
-    <button data-t="atc">AVIATION</button>
+    <button data-t="police" class="active">POLICE</button>
+    <button data-t="hf">HF TUNER</button>
+    <button data-t="atc">ATC</button>
+    <button data-t="cast">BROADCAST</button>
   </div>
 
   <!-- 1. Police / Fire — OpenMHz -->
@@ -302,12 +336,38 @@
       it loads fine from a normal browser. Audio itself is unrestricted.</div>
   </div>
 
-  <!-- 2. Shortwave / Ham — KiwiSDR -->
+  <!-- 2. Shortwave / Ham — full in-page KiwiSDR WebSocket tuner -->
   <div class="rpane" id="pane-hf">
-    <div class="rpane-head">KiwiSDR public HF receivers — tap to open that node's live web tuner.</div>
+    <div id="tuner">
+      <div id="tuner-node">no receiver — pick one below ▾</div>
+      <div id="tuner-freq-row">
+        <button class="tbtn" id="t-down" title="−1 kHz">‹</button>
+        <input id="t-freq" type="text" inputmode="decimal" value="7100" aria-label="frequency kHz">
+        <span id="t-unit">kHz</span>
+        <button class="tbtn" id="t-up" title="+1 kHz">›</button>
+      </div>
+      <div id="tuner-modes">
+        <button class="mbtn" data-m="am">AM</button>
+        <button class="mbtn" data-m="lsb">LSB</button>
+        <button class="mbtn" data-m="usb">USB</button>
+        <button class="mbtn" data-m="cw">CW</button>
+        <button class="mbtn" data-m="nbfm">FM</button>
+      </div>
+      <div id="tuner-bands"></div>
+      <div id="smeter-wrap"><div id="smeter"></div><span id="smeter-val">S–</span></div>
+      <div id="tuner-ctl">
+        <button class="btn sm" id="t-connect">CONNECT</button>
+        <button class="btn sm" id="t-stop" disabled>STOP</button>
+        <a class="btn sm" id="t-native" target="_blank" rel="noopener" style="display:none">native ↗</a>
+      </div>
+      <div id="tuner-status">select a receiver to begin</div>
+    </div>
+    <div class="rpane-head">Public KiwiSDR receivers — tap to tune here in-page.</div>
     <div class="rpane-body" id="hf-list"></div>
-    <div class="note">KiwiSDR audio is a WebSocket protocol (no plain URL), so pins open the
-      node's native tuner at :8073 — zero-install click-to-listen across 0–30 MHz.</div>
+    <div class="note">Full in-page tuner: connects over the KiwiSDR WebSocket protocol,
+      decodes its IMA-ADPCM audio, and plays via Web Audio — no plugin, no new tab.
+      Nodes are <b>http/ws</b>, so run seehear from a local file (not an https host) or
+      the browser will block the connection; use “native ↗” as a fallback.</div>
   </div>
 
   <!-- 3. Aviation ATC — LiveATC -->
@@ -317,6 +377,20 @@
     <div class="note">LiveATC streams are mp3 and <b>&lt;audio&gt;</b> playback isn't CORS-gated,
       but LiveATC may reject hotlinks by Referer — ▶ tries inline first, ↗ is the guaranteed
       fallback. METARs from aviationweather.gov refresh every 5 min.</div>
+  </div>
+
+  <!-- 4. Broadcast — radio-browser.info (40k+ stations) -->
+  <div class="rpane" id="pane-cast">
+    <div class="ctl">
+      <input id="cast-q" placeholder="search stations / genre…" autocomplete="off"
+        style="flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);
+        color:var(--ink);padding:8px 10px;border-radius:8px;font-family:var(--mono);font-size:12px">
+      <button class="btn sm" id="cast-go">find</button>
+    </div>
+    <div class="rpane-head" id="cast-head">Top stations near you — tap to play.</div>
+    <div class="rpane-body" id="cast-list"></div>
+    <div class="note">radio-browser.info · 40k+ community-indexed stations worldwide,
+      streamed straight into the player. Toggle “Broadcast stations” on the map to see them plotted.</div>
   </div>
 
   <div id="player">
@@ -384,6 +458,35 @@ function havKm(lat1,lon1,lat2,lon2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 const fmtKm = km => km<1?Math.round(km*1000)+' m':km<100?km.toFixed(1)+' km':Math.round(km)+' km';
+
+// ---- ADS-B: airplanes.live primary, adsb.fi fallback (adsb.lol is down).
+// Both share the readsb /v2 schema: {ac:[{hex,flight,lat,lon,alt_baro,gs,...}]}
+const ADSB_HOSTS=['https://api.airplanes.live/v2','https://opendata.adsb.fi/api/v2'];
+async function adsb(path){
+  let err;
+  for(const h of ADSB_HOSTS){
+    try{ return await getJSON(h+path,{timeout:12000}); }catch(e){ err=e; }
+  }
+  throw err||new Error('all ADS-B hosts unreachable');
+}
+function acFeatures(j,kind){
+  return (j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null).map(a=>({
+    type:'Feature',geometry:{type:'Point',coordinates:[a.lon,a.lat]},
+    properties:{_kind:kind,
+      flight:String(a.flight||a.r||a.hex||'?').trim(),
+      type:a.t||'?',desc:a.desc||'',op:a.ownOp||'',
+      alt:a.alt_baro??a.alt_geom??'?',spd:a.gs!=null?Math.round(a.gs):'?',
+      trk:a.track!=null?Math.round(a.track):null,
+      sq:a.squawk||'',hex:a.hex||'',mil:a.dbFlags&1?1:0}}));
+}
+const acPopup=p=>`<h4>${p.mil?'🎖':'✈'} ${escapeHtml(p.flight)}</h4>
+  ${p.desc?`<div class="kv"><span>aircraft</span>${escapeHtml(p.desc)}</div>`:
+    `<div class="kv"><span>type</span>${escapeHtml(p.type)}</div>`}
+  ${p.op?`<div class="kv"><span>operator</span>${escapeHtml(p.op)}</div>`:''}
+  <div class="kv"><span>alt</span>${p.alt} ft</div>
+  <div class="kv"><span>speed</span>${p.spd} kt${p.trk!=null?' · '+p.trk+'°':''}</div>
+  <div class="kv"><span>squawk</span>${escapeHtml(p.sq||'—')}</div>
+  <div class="kv"><span>hex</span>${escapeHtml(p.hex)}</div>`;
 // nearest feature (Point geometry) in a layer's current data to a lat/lon
 function nearestIn(srcId,lat,lon){
   const s=gl.getSource(srcId); if(!s||!s._data) return null;
@@ -465,43 +568,36 @@ defLayer({
 });
 
 defLayer({
-  id:'mil', label:'Military aircraft', color:'#ffb454', group:'move', refresh:60,
+  id:'allair', label:'All aircraft (in view)', color:'#8fd6ff', group:'move', refresh:20,
+  // every aircraft inside the current viewport — airplanes.live point query
+  // centered on the map, radius scaled to what's on screen (cap 250 nm)
   loader: async ()=>{
-    const j=await getJSON('https://api.adsb.lol/v2/mil');
-    const ac=(j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null);
-    return { type:'FeatureCollection', features: ac.map(a=>({
-      type:'Feature', geometry:{type:'Point',coordinates:[a.lon,a.lat]},
-      properties:{ _kind:'mil', flight:String(a.flight||a.r||a.hex||'?').trim(),
-        type:a.t||'?', alt:a.alt_baro??a.alt_geom??'?', spd:a.gs!=null?Math.round(a.gs):'?',
-        sq:a.squawk||'', hex:a.hex||'' }
-    }))};
+    const c=gl.getCenter(), b=gl.getBounds();
+    const radNm=Math.min(250,Math.max(20,
+      havKm(c.lat,c.lng,b.getNorth(),c.lng)/1.852));
+    const j=await adsb(`/point/${c.lat.toFixed(3)}/${c.lng.toFixed(3)}/${Math.round(radNm)}`);
+    return {type:'FeatureCollection',features:acFeatures(j,'allair')};
   },
-  popup:p=>`<h4>✈ ${escapeHtml(p.flight)}</h4>
-    <div class="kv"><span>type</span>${escapeHtml(p.type)}</div>
-    <div class="kv"><span>alt</span>${p.alt} ft</div>
-    <div class="kv"><span>speed</span>${p.spd} kt</div>
-    <div class="kv"><span>squawk</span>${escapeHtml(p.sq||'—')}</div>
-    <div class="kv"><span>hex</span>${escapeHtml(p.hex)}</div>`
+  popup:acPopup
+});
+
+defLayer({
+  id:'mil', label:'Military aircraft', color:'#ffb454', group:'move', refresh:60,
+  loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')}),
+  popup:acPopup
 });
 
 defLayer({
   id:'nearair', label:'Aircraft near me', color:'#5cc8ff', group:'move', refresh:45, defaultOff:true,
-  // all civil+mil traffic within 100 nm of the user — auto-enabled once located
   loader: async ()=>{
     if(USER.lat==null) throw new Error('no position fix yet');
-    const j=await getJSON(`https://api.adsb.lol/v2/point/${USER.lat.toFixed(3)}/${USER.lon.toFixed(3)}/100`);
-    const ac=(j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null);
-    return {type:'FeatureCollection',features:ac.map(a=>({
-      type:'Feature',geometry:{type:'Point',coordinates:[a.lon,a.lat]},
-      properties:{_kind:'nearair',flight:String(a.flight||a.r||a.hex||'?').trim(),
-        type:a.t||'?',alt:a.alt_baro??a.alt_geom??'?',spd:a.gs!=null?Math.round(a.gs):'?',
-        km:Math.round(havKm(USER.lat,USER.lon,a.lat,a.lon))}}))};
+    const j=await adsb(`/point/${USER.lat.toFixed(3)}/${USER.lon.toFixed(3)}/100`);
+    const feats=acFeatures(j,'nearair');
+    feats.forEach(f=>f.properties.km=Math.round(
+      havKm(USER.lat,USER.lon,f.geometry.coordinates[1],f.geometry.coordinates[0])));
+    return {type:'FeatureCollection',features:feats};
   },
-  popup:p=>`<h4>✈ ${escapeHtml(p.flight)}</h4>
-    <div class="kv"><span>type</span>${escapeHtml(p.type)}</div>
-    <div class="kv"><span>alt</span>${p.alt} ft</div>
-    <div class="kv"><span>speed</span>${p.spd} kt</div>
-    <div class="kv"><span>range</span>${p.km} km from you</div>`
+  popup:p=>acPopup(p)+`<div class="kv"><span>range</span>${p.km} km from you</div>`
 });
 
 defLayer({
@@ -509,7 +605,7 @@ defLayer({
   loader: async ()=>{
     // 7700 = general emergency, 7600 = radio failure, 7500 = unlawful interference
     const codes=['7700','7600','7500'];
-    const results=await Promise.allSettled(codes.map(c=>getJSON('https://api.adsb.lol/v2/squawk/'+c)));
+    const results=await Promise.allSettled(codes.map(c=>adsb('/squawk/'+c)));
     const feats=[];
     results.forEach((r,i)=>{
       if(r.status!=='fulfilled') return;
@@ -517,16 +613,41 @@ defLayer({
         if(a.lat==null||a.lon==null) return;
         feats.push({type:'Feature',geometry:{type:'Point',coordinates:[a.lon,a.lat]},
           properties:{_kind:'sos',_r:8,flight:String(a.flight||a.r||a.hex||'?').trim(),
-            code:codes[i],type:a.t||'?',alt:a.alt_baro??'?'}});
+            code:codes[i],type:a.t||'?',desc:a.desc||'',alt:a.alt_baro??'?'}});
       });
     });
     return {type:'FeatureCollection',features:feats};
   },
   popup:p=>`<h4 style="color:var(--danger)">🚨 SQUAWK ${p.code}</h4>
     <div class="kv"><span>flight</span>${escapeHtml(p.flight)}</div>
-    <div class="kv"><span>type</span>${escapeHtml(p.type)}</div>
+    <div class="kv"><span>aircraft</span>${escapeHtml(p.desc||p.type)}</div>
     <div class="kv"><span>alt</span>${p.alt} ft</div>
     <div class="kv"><span>meaning</span>${p.code==='7700'?'emergency':p.code==='7600'?'radio failure':'unlawful interference'}</div>`
+});
+
+defLayer({
+  id:'ships', label:'Ships / AIS', color:'#48d1a0', group:'move', refresh:60, defaultOff:true,
+  note:'Digitraffic AIS is keyless & global-schema but covers the Baltic / Gulf of Finland only — the honest keyless ship feed (global AIS all needs a paid key).',
+  loader: async ()=>{
+    // Finnish Transport Agency open AIS (GeoJSON). Browsers auto-send gzip,
+    // which the API requires. Real live vessels; regional coverage.
+    const j=await getJSON('https://meri.digitraffic.fi/api/ais/v1/locations',{timeout:20000});
+    const NAV={0:'under way',1:'anchored',2:'not under command',3:'restricted',
+      5:'moored',7:'fishing',8:'sailing'};
+    return {type:'FeatureCollection',features:(j.features||[]).filter(f=>f.geometry).map(f=>{
+      const p=f.properties||{};
+      return {type:'Feature',geometry:f.geometry,
+        properties:{_kind:'ship',mmsi:p.mmsi,
+          sog:p.sog!=null?p.sog+' kn':'—',cog:p.cog,
+          nav:NAV[p.navStat]||('status '+(p.navStat??'?')),
+          heading:p.heading}};
+    })};
+  },
+  popup:p=>`<h4>🚢 Vessel ${escapeHtml(String(p.mmsi))}</h4>
+    <div class="kv"><span>speed</span>${escapeHtml(p.sog)}</div>
+    <div class="kv"><span>course</span>${p.cog!=null?p.cog+'°':'—'}</div>
+    <div class="kv"><span>status</span>${escapeHtml(p.nav)}</div>
+    <div class="kv"><span>src</span>Digitraffic AIS · MMSI ${escapeHtml(String(p.mmsi))}</div>`
 });
 
 defLayer({
@@ -722,6 +843,31 @@ defLayer({
     <div class="kv"><span>mentions</span>${escapeHtml(String(p.count||'?'))} (24h)</div>
     <div class="kv"><span>query</span>conflict/military/protest</div>
     <div class="kv"><span>src</span>GDELT 2.0 geo</div>`
+});
+
+defLayer({
+  id:'broadcast', label:'Broadcast stations', color:'#ff7ac2', group:'geo', refresh:0, defaultOff:true,
+  // radio-browser.info — 40k+ geolocated internet-radio stations worldwide.
+  // Loads the ~600 nearest the viewport centre; click a pin to play in-page.
+  loader: async ()=>{
+    const c=gl.getCenter();
+    const j=await getJSON('https://de1.api.radio-browser.info/json/stations/search?'+
+      'has_geo_info=true&hidebroken=true&limit=600&order=clickcount&reverse=true',{timeout:20000});
+    const feats=(j||[]).filter(s=>s.geo_lat&&s.geo_long&&(s.url_resolved||s.url)).map(s=>({
+      type:'Feature',geometry:{type:'Point',coordinates:[+s.geo_long,+s.geo_lat]},
+      properties:{_kind:'broadcast',name:s.name,url:s.url_resolved||s.url,
+        cc:s.countrycode||'',tags:(s.tags||'').split(',').slice(0,3).join(', '),
+        codec:s.codec||'',bitrate:s.bitrate||0}}));
+    // sort nearest-first to the viewport centre, keep the closest ~400
+    feats.sort((a,b)=>havKm(c.lat,c.lng,a.geometry.coordinates[1],a.geometry.coordinates[0])
+      -havKm(c.lat,c.lng,b.geometry.coordinates[1],b.geometry.coordinates[0]));
+    return {type:'FeatureCollection',features:feats.slice(0,400)};
+  },
+  popup:p=>`<h4>📻 ${escapeHtml(p.name)}</h4>
+    <div class="kv"><span>country</span>${escapeHtml(p.cc)}</div>
+    ${p.tags?`<div class="kv"><span>genre</span>${escapeHtml(p.tags)}</div>`:''}
+    <div class="kv"><span>quality</span>${escapeHtml(p.codec)} ${p.bitrate?p.bitrate+'k':''}</div>
+    <div class="lnk"><a href="#" onclick="playBroadcast(${JSON.stringify(p.url).replace(/"/g,'&quot;')},${JSON.stringify(p.name).replace(/"/g,'&quot;')});return false;">▶ play in-page</a></div>`
 });
 
 defLayer({
@@ -1142,6 +1288,14 @@ async function sitrepTick(){
       ns?('nearest: '+escapeHtml(ns.f.properties.flight)+' ('+ns.f.properties.code+') · '+fmtKm(ns.km)):'',
       ns?`<button class="act" data-act="fly" data-ll="${ns.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
   }
+  const shSrc=gl.getSource('src-ships');
+  const shN=shSrc&&shSrc._data?(shSrc._data.features||[]).length:0;
+  if(shN){
+    const nsh=nearestIn('src-ships',lat,lon);
+    row('','🚢',shN+' vessels tracked (AIS)',
+      nsh?('nearest: MMSI '+escapeHtml(String(nsh.f.properties.mmsi))+' · '+fmtKm(nsh.km)):'',
+      nsh?`<button class="act" data-act="fly" data-ll="${nsh.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
+  }
 
   // -- ground truth --
   const nq=nearestIn('src-quakes',lat,lon);
@@ -1169,8 +1323,13 @@ async function sitrepTick(){
     `<button class="act" data-act="atc" data-icao="${escapeHtml(na.f.properties.icao)}">LISTEN</button>`);
   const nk=nearestIn('src-kiwi',lat,lon);
   if(nk) row('','📻','HF radio: '+escapeHtml(nk.f.properties.name)+' · '+fmtKm(nk.km),
-    'shortwave receiver 0–30 MHz',
-    `<button class="act" data-act="kiwi" data-host="${escapeHtml(nk.f.properties.host)}">OPEN</button>`);
+    'in-page shortwave tuner 0–30 MHz',
+    `<button class="act" data-act="tune" data-host="${escapeHtml(nk.f.properties.host)}" data-name="${escapeHtml(nk.f.properties.name)}">TUNE</button>`);
+  const bcSrc=gl.getSource('src-broadcast');
+  const bcN=bcSrc&&bcSrc._data?(bcSrc._data.features||[]).length:0;
+  row('','📡',bcN?bcN+' broadcast stations in range':'40k+ broadcast stations',
+    'internet radio — every station, click to play',
+    `<button class="act" data-act="cast">OPEN</button>`);
 
   // -- space weather hint --
   if(KP!=null&&KP>=5&&Math.abs(lat)>=48)
@@ -1192,10 +1351,21 @@ $('#sit-body').addEventListener('click',e=>{
   if(act==='atc'){
     const a=LIVEATC.find(x=>x.icao===b.dataset.icao);
     const r=document.querySelector(`#atc-list .rrow[data-icao="${b.dataset.icao}"]`);
-    if(a&&r) playATC(a,r);
+    if(a&&r){ switchRadioTab('atc'); playATC(a,r); }
   }
-  if(act==='kiwi'&&b.dataset.host) window.open('http://'+b.dataset.host,'_blank','noopener');
+  if(act==='tune'&&b.dataset.host){
+    switchRadioTab('hf'); kwSelect(b.dataset.host,b.dataset.name||b.dataset.host);
+    if(window.matchMedia('(max-width:900px)').matches) openSheet('radio');
+  }
+  if(act==='cast'){
+    switchRadioTab('cast'); if(!castLoaded){castLoaded=true;loadCast('');}
+    if(window.matchMedia('(max-width:900px)').matches) openSheet('radio');
+  }
 });
+function switchRadioTab(t){
+  const btn=document.querySelector(`#radio-tabs button[data-t="${t}"]`);
+  if(btn) btn.click();
+}
 $('#sit-head').addEventListener('click',()=>{
   // collapse toggle on desktop; on mobile the sheet grip handles closing
   if(!window.matchMedia('(max-width:900px)').matches)
@@ -1292,6 +1462,7 @@ function playNext(){
   playCall(call,row);
 }
 function playCall(call,row){
+  stopKiwi();
   document.querySelectorAll('.rrow.playing').forEach(r=>r.classList.remove('playing'));
   if(row) row.classList.add('playing');
   mhzPlaying=true; atcPlaying=null;
@@ -1301,10 +1472,10 @@ function playCall(call,row){
 }
 audio.addEventListener('ended',()=>{
   document.querySelectorAll('.rrow.playing').forEach(r=>r.classList.remove('playing'));
-  if(mhzCur&&!atcPlaying) playNext();
-  else { mhzPlaying=false; $('#nowplaying').textContent='— idle —'; }
+  if(mhzCur&&!atcPlaying&&!KW.live) playNext();
+  else { mhzPlaying=false; if(!KW.live) $('#nowplaying').textContent='— idle —'; }
 });
-audio.addEventListener('error',()=>{ if(mhzCur&&!atcPlaying){ mhzPlaying=false; playNext(); } });
+audio.addEventListener('error',()=>{ if(mhzCur&&!atcPlaying&&!KW.live){ mhzPlaying=false; playNext(); } });
 
 $('#mhz-sys').addEventListener('change',e=>{
   if(e.target.value){ mhzScan=false; $('#mhz-scan').classList.remove('on'); selectSystem(e.target.value); }
@@ -1329,17 +1500,259 @@ function advanceScan(){
 /* =====================================================================
    8. RADIO DOMAIN 2 — KiwiSDR HF nodes -> pins + new-tab native tuner
    ===================================================================== */
+/* ---- Full in-page KiwiSDR tuner ----------------------------------------
+   Implements the KiwiSDR WebSocket protocol: open ws://host/<t>/SND, send
+   the SET auth/mode/agc/compression handshake, receive binary 'SND' frames
+   (flags[1] seq[4 LE] smeter[2 BE] then IMA-ADPCM audio), decode ADPCM and
+   play through Web Audio with gapless scheduling. Nodes are http/ws, so a
+   file:// origin is required (an https host blocks the mixed-content ws).
+   NOTE: authored to protocol spec; live audio can't be exercised from this
+   sandbox (no browser egress), so the native ↗ fallback is always offered. */
+const IMA_INDEX=[-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8];
+const IMA_STEP=[7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,24623,27086,29794,32767];
+function makeAdpcm(){
+  let idx=0,pred=0;
+  return { reset(){idx=0;pred=0;},
+    decode(u8){
+      const out=new Int16Array(u8.length*2); let o=0;
+      for(let i=0;i<u8.length;i++){
+        const b=u8[i];
+        for(const nib of [b&0x0f,(b>>4)&0x0f]){
+          const step=IMA_STEP[idx];
+          let diff=step>>3;
+          if(nib&4)diff+=step; if(nib&2)diff+=step>>1; if(nib&1)diff+=step>>2;
+          pred += (nib&8)?-diff:diff;
+          pred = pred>32767?32767:pred<-32768?-32768:pred;
+          idx += IMA_INDEX[nib];
+          idx = idx<0?0:idx>88?88:idx;
+          out[o++]=pred;
+        }
+      }
+      return out;
+    }};
+}
+const PASSBANDS={am:[-4900,4900],lsb:[-2700,-300],usb:[300,2700],cw:[300,700],nbfm:[-6000,6000]};
+const KIWI_BANDS=[['160m',1900,'lsb'],['80m',3700,'lsb'],['49mb',6100,'am'],['40m',7100,'lsb'],
+  ['WWV',10000,'am'],['31mb',9600,'am'],['25mb',11800,'am'],['20m',14100,'usb'],
+  ['19mb',15400,'am'],['16mb',17700,'am'],['15m',21100,'usb'],['13mb',21600,'am'],['11m',27200,'am']];
+
+const KW={host:null,name:null,ws:null,ctx:null,gain:null,adpcm:null,playAt:0,
+  rate:12000,mode:'am',freq:7100,live:false,keep:null};
+
 function buildHF(){
+  // band chips
+  const bb=$('#tuner-bands');
+  KIWI_BANDS.forEach(([lbl,khz,mode])=>{
+    const c=el('button','bband',lbl); c.onclick=()=>{ kwSetMode(mode); kwSetFreq(khz); };
+    bb.appendChild(c);
+  });
+  // mode buttons
+  document.querySelectorAll('.mbtn').forEach(b=>b.onclick=()=>kwSetMode(b.dataset.m));
+  $('#t-up').onclick=()=>kwSetFreq(KW.freq+1);
+  $('#t-down').onclick=()=>kwSetFreq(KW.freq-1);
+  $('#t-freq').addEventListener('change',e=>{const v=parseFloat(e.target.value);if(isFinite(v))kwSetFreq(v);});
+  $('#t-connect').onclick=kwConnect;
+  $('#t-stop').onclick=kwStop;
+  kwSetMode('am'); kwSetFreq(7100);
+
+  // receiver list
   const list=$('#hf-list');
   KIWI.forEach(k=>{                       // k = [name, host, [lat,lon], locLabel]
-    const row=el('div','rrow');
+    const row=el('div','rrow'); row.dataset.host=k[1];
     row.innerHTML=`<div class="rmain"><b>${escapeHtml(k[0])}</b>
-      <span>${escapeHtml(k[3])} · HF 0–30 MHz</span></div><button class="btn sm">↗</button>`;
-    row.onclick=()=>{
-      gl.flyTo({center:[k[2][1],k[2][0]],zoom:5});
-      window.open('http://'+k[1],'_blank','noopener');
-    };
+      <span>${escapeHtml(k[3])} · HF 0–30 MHz</span></div><button class="btn sm">tune</button>`;
+    row.onclick=()=>{ gl.flyTo({center:[k[2][1],k[2][0]],zoom:5}); kwSelect(k[1],k[0]); };
     list.appendChild(row);
+  });
+}
+function kwSelect(host,name){
+  if(KW.live) kwStop();
+  KW.host=host; KW.name=name;
+  $('#tuner-node').textContent='▸ '+name;
+  const nat=$('#t-native'); nat.style.display='inline-block'; nat.href='http://'+host;
+  $('#tuner-status').textContent='ready — press CONNECT to stream';
+  document.querySelectorAll('#hf-list .rrow').forEach(r=>
+    r.classList.toggle('playing',r.dataset.host===host));
+}
+function kwSetMode(m){
+  if(!PASSBANDS[m]) return;
+  KW.mode=m;
+  document.querySelectorAll('.mbtn').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+  $('#t-unit').textContent=m.toUpperCase()+' · kHz';
+  if(KW.live) kwSend(kwTuneCmd());
+}
+function kwSetFreq(khz){
+  khz=Math.max(1,Math.min(30000,+khz.toFixed(2)));
+  KW.freq=khz; $('#t-freq').value=khz;
+  document.querySelectorAll('.bband').forEach(c=>c.classList.remove('on'));
+  if(KW.live) kwSend(kwTuneCmd());
+}
+function kwTuneCmd(){
+  const [lo,hi]=PASSBANDS[KW.mode];
+  return `SET mod=${KW.mode} low_cut=${lo} high_cut=${hi} freq=${KW.freq}`;
+}
+function kwSend(s){ try{ KW.ws&&KW.ws.readyState===1&&KW.ws.send(s); }catch(e){} }
+
+function kwConnect(){
+  if(KW.live||!KW.host) return;
+  if(location.protocol==='https:'){
+    $('#tuner-status').innerHTML='<span style="color:var(--warn)">this page is on https — '+
+      'browsers block the KiwiSDR ws:// stream. Use “native ↗”, or run seehear from a local file.</span>';
+    return;
+  }
+  stopSharedAudio(); // hand audio focus to the tuner
+  let host=KW.host; if(!/:/.test(host)) host+=':8073';
+  const t=Math.floor(Math.random()*1e6);
+  $('#tuner-status').innerHTML='<span class="spin"></span> connecting to '+escapeHtml(host)+'…';
+  let ws;
+  try{ ws=new WebSocket('ws://'+host+'/'+t+'/SND'); }
+  catch(e){ $('#tuner-status').textContent='connection failed: '+e.message; return; }
+  ws.binaryType='arraybuffer'; KW.ws=ws;
+  KW.adpcm=makeAdpcm();
+  if(!KW.ctx){ KW.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    KW.gain=KW.ctx.createGain(); KW.gain.gain.value=1.0; KW.gain.connect(KW.ctx.destination); }
+  if(KW.ctx.state==='suspended') KW.ctx.resume();
+  KW.playAt=0;
+
+  ws.onopen=()=>{
+    kwSend('SET auth t=kiwi p=');
+    kwSend('SET AR OK in='+KW.rate+' out=44100');
+    kwSend('SET squelch=0 max=0');
+    kwSend('SET agc=1 hang=0 thresh=-100 slope=6 decay=1000 manGain=50');
+    kwSend(kwTuneCmd());
+    kwSend('SET compression=1');
+    KW.keep=setInterval(()=>kwSend('SET keepalive'),5000);
+    KW.live=true;
+    $('#t-connect').disabled=true; $('#t-connect').classList.add('live');
+    $('#t-stop').disabled=false;
+    $('#tuner-status').innerHTML='▶ streaming '+escapeHtml(KW.name)+' · '+KW.freq+' kHz '+KW.mode.toUpperCase();
+    $('#nowplaying').textContent='📻 '+KW.name+' · '+KW.freq+' kHz';
+  };
+  ws.onmessage=ev=>{
+    if(typeof ev.data==='string'){ kwMsg(ev.data); return; }
+    const buf=ev.data, dv=new DataView(buf);
+    if(buf.byteLength<3) return;
+    const tag=String.fromCharCode(dv.getUint8(0),dv.getUint8(1),dv.getUint8(2));
+    if(tag==='SND'){
+      if(buf.byteLength<=10) return;
+      const smeter=dv.getUint16(8,false)&0x0fff;
+      const rssi=smeter*0.1-127;
+      kwMeter(rssi);
+      const data=new Uint8Array(buf,10);
+      kwPlay(KW.adpcm.decode(data));
+    } else if(tag==='MSG'){
+      kwMsg(new TextDecoder().decode(new Uint8Array(buf,3)));
+    }
+  };
+  ws.onclose=()=>{ if(KW.live){ $('#tuner-status').textContent='connection closed'; } kwCleanup(); };
+  ws.onerror=()=>{ $('#tuner-status').innerHTML='<span style="color:var(--danger)">'+
+    'stream error — node offline/full, or ws blocked. Try “native ↗”.</span>'; };
+}
+function kwMsg(s){
+  const m=/sample_rate=([\d.]+)/.exec(s)||/audio_rate=([\d.]+)/.exec(s);
+  if(m){ const r=parseFloat(m[1]); if(r>4000&&r<96000) KW.rate=r; }
+  if(/too_busy|down|badp/.test(s))
+    $('#tuner-status').innerHTML='<span style="color:var(--warn)">receiver full/unavailable — try another</span>';
+}
+function kwPlay(int16){
+  if(!KW.ctx||!int16.length) return;
+  const buf=KW.ctx.createBuffer(1,int16.length,KW.rate);
+  const ch=buf.getChannelData(0);
+  for(let i=0;i<int16.length;i++) ch[i]=int16[i]/32768;
+  const src=KW.ctx.createBufferSource(); src.buffer=buf; src.connect(KW.gain);
+  const now=KW.ctx.currentTime;
+  if(KW.playAt<now+0.02) KW.playAt=now+0.12; // (re)prime buffer on gaps
+  src.start(KW.playAt); KW.playAt+=int16.length/KW.rate;
+}
+function kwMeter(rssi){
+  const pct=Math.max(0,Math.min(100,(rssi+127)*0.9));
+  $('#smeter').style.setProperty('--s',pct.toFixed(0)+'%');
+  $('#smeter-val').textContent=Math.round(rssi)+' dBm';
+}
+function kwStop(){ if(KW.ws){ try{KW.ws.close();}catch(e){} } kwCleanup();
+  $('#tuner-status').textContent='stopped'; if($('#nowplaying').textContent.startsWith('📻'))
+    $('#nowplaying').textContent='— idle —'; }
+function kwCleanup(){
+  KW.live=false; if(KW.keep){clearInterval(KW.keep);KW.keep=null;}
+  $('#t-connect').disabled=false; $('#t-connect').classList.remove('live');
+  $('#t-stop').disabled=true;
+  $('#smeter').style.setProperty('--s','0%'); $('#smeter-val').textContent='S–';
+}
+
+/* ---- Broadcast domain: radio-browser.info -------------------------------- */
+function playBroadcast(url,name){
+  stopKiwi(); mhzCur=null; atcPlaying=null; mhzPlaying=false;
+  audio.src=url;
+  $('#nowplaying').textContent='📻 '+name;
+  audio.play().catch(()=>{ $('#nowplaying').textContent='press ▶ on the player to start'; });
+  document.querySelectorAll('#cast-list .rrow.playing').forEach(r=>r.classList.remove('playing'));
+}
+window.playBroadcast=playBroadcast;
+
+async function loadCast(query){
+  const list=$('#cast-list'); list.innerHTML='<div class="note">loading…</div>';
+  try{
+    let url;
+    if(query){
+      url='https://de1.api.radio-browser.info/json/stations/search?hidebroken=true&limit=80&order=clickcount&reverse=true&name='+encodeURIComponent(query);
+      $('#cast-head').textContent='Results for “'+query+'” — tap to play.';
+    } else if(USER.cc){
+      url='https://de1.api.radio-browser.info/json/stations/search?hidebroken=true&limit=80&order=clickcount&reverse=true&countrycode='+encodeURIComponent(USER.cc);
+      $('#cast-head').textContent='Top stations in '+USER.cc+' — tap to play.';
+    } else {
+      url='https://de1.api.radio-browser.info/json/stations/search?hidebroken=true&limit=80&order=clickcount&reverse=true';
+      $('#cast-head').textContent='Top stations worldwide — tap to play.';
+    }
+    const j=await getJSON(url,{timeout:20000});
+    list.innerHTML='';
+    (j||[]).filter(s=>s.url_resolved||s.url).slice(0,80).forEach(s=>{
+      const row=el('div','rrow');
+      row.innerHTML=`<div class="rmain"><b>${escapeHtml(s.name.trim()||'station')}</b>
+        <span>${escapeHtml(s.countrycode||'')} · ${escapeHtml((s.tags||'').split(',').slice(0,2).join(', '))} · ${escapeHtml(s.codec||'')} ${s.bitrate?s.bitrate+'k':''}</span></div>
+        <button class="btn sm">▶</button>`;
+      row.onclick=()=>{ document.querySelectorAll('#cast-list .rrow.playing').forEach(r=>r.classList.remove('playing'));
+        row.classList.add('playing'); playBroadcast(s.url_resolved||s.url,s.name.trim()); };
+      list.appendChild(row);
+    });
+    if(!list.children.length) list.innerHTML='<div class="note">no stations found.</div>';
+  }catch(e){ list.innerHTML='<div class="note" style="color:var(--danger)">radio-browser unavailable: '+escapeHtml(e.message)+'</div>'; }
+}
+let castLoaded=false;
+
+/* ---- shared-audio coordination between the domains ----------------------- */
+function stopKiwi(){ if(KW.live) kwStop(); }
+function stopSharedAudio(){ try{audio.pause();}catch(e){} } // hand focus to the tuner
+
+/* ---- RainViewer precipitation radar overlay ------------------------------ */
+let radarOn=false, radarTimer=null;
+async function refreshRadar(){
+  try{
+    const j=await getJSON('https://api.rainviewer.com/public/weather-maps.json',{timeout:12000});
+    const past=j.radar&&j.radar.past; if(!past||!past.length) return;
+    const frame=past[past.length-1];
+    const tiles=[j.host+frame.path+'/256/{z}/{x}/{y}/4/1_1.png'];
+    if(gl.getSource('src-radar')){ gl.getSource('src-radar').setTiles(tiles); }
+    else{
+      gl.addSource('src-radar',{type:'raster',tiles,tileSize:256});
+      // insert just above the basemap so data points stay on top
+      const first=gl.getStyle().layers.find(l=>l.id!=='carto');
+      gl.addLayer({id:'ly-radar',type:'raster',source:'src-radar',
+        paint:{'raster-opacity':0.6}}, first?first.id:undefined);
+    }
+    gl.setLayoutProperty('ly-radar','visibility',radarOn?'visible':'none');
+  }catch(e){ console.warn('[radar]',e.message); }
+}
+function initRadar(){
+  const g=$('#grp-haz');
+  const row=el('div','layer off');
+  row.innerHTML=`<input type="checkbox" id="ck-radar">
+    <span class="sw" style="color:#3fa9ff;background:#3fa9ff"></span>
+    <label for="ck-radar">Weather radar</label><span class="cnt">◐</span>`;
+  g.appendChild(row);
+  row.querySelector('input').addEventListener('change',ev=>{
+    radarOn=ev.target.checked; row.classList.toggle('off',!radarOn);
+    if(radarOn){ refreshRadar(); if(!radarTimer) radarTimer=setInterval(refreshRadar,300000); }
+    else if(gl.getLayer('ly-radar')) gl.setLayoutProperty('ly-radar','visibility','none');
   });
 }
 
@@ -1366,6 +1779,7 @@ function buildATC(){
   });
 }
 function playATC(a,row){
+  stopKiwi();
   document.querySelectorAll('#atc-list .rrow.playing').forEach(r=>r.classList.remove('playing'));
   row.classList.add('playing');
   mhzPlaying=false; atcPlaying=a;
@@ -1468,7 +1882,22 @@ document.querySelectorAll('#radio-tabs button').forEach(b=>{
     document.querySelectorAll('.rpane').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     $('#pane-'+b.dataset.t).classList.add('active');
+    if(b.dataset.t==='cast'&&!castLoaded){ castLoaded=true; loadCast(''); }
   };
+});
+$('#cast-go').addEventListener('click',()=>loadCast($('#cast-q').value.trim()));
+$('#cast-q').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();loadCast($('#cast-q').value.trim());} });
+
+// viewport-dependent layers (all aircraft, broadcast stations) refetch on pan/zoom
+let moveDebounce=null;
+gl.on('moveend',()=>{
+  clearTimeout(moveDebounce);
+  moveDebounce=setTimeout(()=>{
+    ['allair','broadcast'].forEach(id=>{
+      const st=LAYER_STATE[id];
+      if(st&&st.on&&st.started) runLayer(LAYERS.find(l=>l.id===id));
+    });
+  },700);
 });
 
 // mobile: MAP / LAYERS / RADIO bottom nav toggles the panels as sheets
@@ -1580,6 +2009,7 @@ gl.on('load',()=>{
   bindLayerPopups();
   LAYERS.forEach(cfg=>{ if(!cfg.defaultOff) scheduleLayer(cfg); });
   initRadioPins();
+  initRadar();
   buildHF();
   buildATC();
   loadSystems();
@@ -1588,7 +2018,7 @@ gl.on('load',()=>{
   loadXray();   setInterval(loadXray,120000);
   loadKEV();
   locate();
-  toast('seehear online · 3 audio domains · '+LAYERS.length+' live feeds','');
+  toast('seehear online · 4 audio domains · '+LAYERS.length+' live feeds','');
 });
 </script>
 </body>
