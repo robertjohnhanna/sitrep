@@ -46,14 +46,14 @@
 
 <style>
   :root{
-    --bg:#0a0e14; --panel:#0f1620f2; --panel2:#131c28; --line:#1e2b3a;
-    --ink:#c8d6e5; --ink-dim:#7d90a6; --accent:#37e0c9; --accent2:#ffb454;
-    --danger:#ff5c6c; --warn:#ffcb47; --ok:#4be08a;
+    --bg:#000000; --panel:#000000f5; --panel2:#0a0f14; --line:#1a2730;
+    --ink:#d6e2ee; --ink-dim:#748596; --accent:#2fe07a; --accent2:#ff4455;
+    --danger:#ff4455; --warn:#ffb454; --ok:#2fe07a; --live:#ff4455;
     --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --sa-t:env(safe-area-inset-top,0px); --sa-b:env(safe-area-inset-bottom,0px);
     --sa-l:env(safe-area-inset-left,0px); --sa-r:env(safe-area-inset-right,0px);
-    --topbar-h:calc(48px + var(--sa-t));
+    --topbar-h:var(--sa-t);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
@@ -66,45 +66,28 @@
   ::-webkit-scrollbar-thumb{background:#233247;border-radius:4px}
   ::-webkit-scrollbar-track{background:transparent}
 
-  /* ---------- top bar ---------- */
-  #topbar{position:absolute;top:0;left:0;right:0;z-index:20;
-    display:flex;align-items:center;gap:10px;
-    height:var(--topbar-h);
-    padding:var(--sa-t) calc(12px + var(--sa-r)) 0 calc(12px + var(--sa-l));
-    background:linear-gradient(#0a0e14f2,#0a0e14cc);border-bottom:1px solid var(--line);
-    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-  #brand{font-weight:700;letter-spacing:.5px;color:var(--accent);white-space:nowrap;
-    font-size:15px}
-  #brand small{color:var(--ink-dim);font-weight:400;letter-spacing:0;font-size:10px}
-  #search{flex:1;max-width:360px;display:flex;gap:6px;min-width:0}
-  #search input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);
-    color:var(--ink);padding:8px 10px;border-radius:8px;font-family:var(--mono);font-size:13px;
-    -webkit-appearance:none}
-  #search input:focus{outline:none;border-color:var(--accent)}
-  #search input::placeholder{color:var(--ink-dim)}
-  #loc-btn{flex:0 0 auto;border-color:var(--accent);color:var(--accent);font-weight:700;
-    white-space:nowrap}
-  #loc-btn:active{background:var(--accent);color:#06231e}
-  .badges{display:flex;gap:8px;margin-left:auto;align-items:center;overflow-x:auto;
-    scrollbar-width:none}
-  .badges::-webkit-scrollbar{display:none}
-  .badge{display:flex;align-items:center;gap:5px;background:var(--panel2);
-    border:1px solid var(--line);padding:5px 10px;border-radius:20px;font-size:11px;
+  /* ---------- status badges (in SITREP header) ---------- */
+  .badge{display:flex;align-items:center;gap:4px;background:var(--panel2);
+    border:1px solid var(--line);padding:4px 8px;border-radius:5px;font-size:10px;
     color:var(--ink-dim);white-space:nowrap;flex:0 0 auto}
   .badge b{color:var(--ink)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-dim)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-dim)}
 
   /* ---------- panels (desktop: side panels / mobile: bottom sheets) ---------- */
   .panel{position:absolute;z-index:15;background:var(--panel);
     border:1px solid var(--line);border-radius:12px;
     backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     display:flex;flex-direction:column;overflow:hidden}
-  #layers{top:calc(var(--topbar-h) + 10px);left:calc(12px + var(--sa-l));width:262px;
+  #layers{top:calc(var(--topbar-h) + 10px);left:calc(10px + var(--sa-l));width:330px;
     bottom:calc(10px + var(--sa-b))}
-  #layers-scroll{overflow-y:auto;padding:10px;-webkit-overflow-scrolling:touch;
+  #layers-scroll{overflow-y:auto;padding:8px;-webkit-overflow-scrolling:touch;
     flex:1 1 auto;min-height:0}
-  #radio{top:calc(var(--topbar-h) + 10px);right:calc(12px + var(--sa-r));width:330px;
+  #radio{top:calc(var(--topbar-h) + 10px);right:calc(10px + var(--sa-r));width:296px;
     bottom:calc(10px + var(--sa-b))}
+  #obj-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:11px 12px;
+    border-bottom:1px solid var(--line);font-size:12px;letter-spacing:2px;color:var(--accent);
+    font-weight:700}
+  #obj-head .brand{color:var(--ink-dim);letter-spacing:.5px;font-weight:400;margin-left:auto;font-size:10px}
 
   .sheet-grip{display:none}
   .sec-h{font-size:10px;letter-spacing:1.2px;color:var(--ink-dim);
@@ -198,8 +181,8 @@
     border:1px solid var(--line);border-radius:10px;font-family:var(--mono);
     box-shadow:0 10px 34px #000c;max-width:300px;padding:12px 14px}
   .maplibregl-popup-close-button{color:var(--ink-dim);font-size:18px;padding:2px 8px}
-  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip{border-top-color:#0f1620}
-  .maplibregl-popup-anchor-top .maplibregl-popup-tip{border-bottom-color:#0f1620}
+  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip{border-top-color:#000}
+  .maplibregl-popup-anchor-top .maplibregl-popup-tip{border-bottom-color:#000}
   .pop h4{margin:0 0 6px;color:var(--accent);font-size:13px}
   .pop .kv{display:flex;gap:6px;font-size:11px;margin:2px 0}
   .pop .kv span{color:var(--ink-dim);min-width:66px;flex:0 0 auto}
@@ -224,16 +207,23 @@
      one third of the viewport tall; the map padding keeps content centred
      in the open area above it. */
   #sitrep{bottom:calc(10px + var(--sa-b));top:auto;margin:0;
-    left:calc(286px + var(--sa-l));right:calc(354px + var(--sa-r));width:auto;
+    left:calc(352px + var(--sa-l));right:calc(318px + var(--sa-r));width:auto;
     height:33vh;max-height:33vh}
   #sit-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
     gap:0 12px;align-content:start;padding:6px 4px}
-  #sit-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;
-    border-bottom:1px solid var(--line);flex:0 0 auto;min-height:40px}
-  #sit-head b{color:var(--accent);font-size:12px;letter-spacing:.8px}
-  #sit-head .loc{flex:1;min-width:0;color:var(--ink);font-size:11px;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis;text-align:right}
-  #sit-head .chev{color:var(--ink-dim);transition:transform .2s}
+  #sit-head{display:flex;align-items:center;gap:10px;padding:9px 12px;
+    border-bottom:1px solid var(--line);flex:0 0 auto;min-height:42px}
+  #sit-head .title{color:var(--accent);font-size:12px;letter-spacing:1.4px;font-weight:700;
+    cursor:pointer;flex:0 0 auto}
+  #sit-badges{display:flex;gap:7px;align-items:center;overflow-x:auto;scrollbar-width:none}
+  #sit-badges::-webkit-scrollbar{display:none}
+  #sit-head .loc{margin-left:auto;color:var(--ink);font-size:11px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;max-width:40%;text-align:right;flex:0 1 auto}
+  #sit-head .chev{color:var(--ink-dim);transition:transform .2s;cursor:pointer;
+    padding:2px 4px;flex:0 0 auto}
+  #loc-btn{flex:0 0 auto;border-color:var(--accent);color:var(--accent);font-weight:700;
+    white-space:nowrap;padding:5px 10px;min-height:30px;font-size:11px}
+  #loc-btn:active{background:var(--accent);color:#00140a}
   #sitrep.collapsed .chev{transform:rotate(180deg)}
   #sitrep.collapsed #sit-body{display:none}
   #sitrep.collapsed{height:auto;max-height:none}
@@ -255,23 +245,22 @@
   .sit-anom:first-child{border-top:none}
   .sit-div{grid-column:1/-1;height:1px;background:var(--line);margin:5px 12px}
   /* ---- minimalist ALL-CAPS chrome. Units opt out via .u ---- */
-  #brand,.sec-h,.layer label,#radio-tabs button,.rrow .rmain b,#sit-head b,
+  #obj-head,.sec-h,.layer label,#radio-tabs button,.rrow .rmain b,#sit-head .title,
   .rpane-head,.btn,.mbtn,.pop h4,.pop .kv span,.badge,#mnav button,#tuner-node,
-  .sit-row .tx s1,#cast-head,#atc-head,#search button,.sit-row .act{text-transform:uppercase}
+  .sit-row .tx s1,#cast-head,#atc-head,.sit-row .act,#panel-foot{text-transform:uppercase}
   .u{text-transform:none!important;letter-spacing:0;font-style:normal}
   .sit-row .tx s1{letter-spacing:.3px}
-  #brand small{text-transform:none}
 
   #user-dot{width:16px;height:16px;border-radius:50%;background:var(--accent);
-    border:2.5px solid #fff;box-shadow:0 0 0 0 rgba(55,224,201,.55);animation:pulse 2.2s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(55,224,201,.55)}70%{box-shadow:0 0 0 16px rgba(55,224,201,0)}100%{box-shadow:0 0 0 0 rgba(55,224,201,0)}}
+    border:2.5px solid #fff;box-shadow:0 0 0 0 rgba(47,224,122,.6);animation:pulse 2.2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,224,122,.6)}70%{box-shadow:0 0 0 16px rgba(47,224,122,0)}100%{box-shadow:0 0 0 0 rgba(47,224,122,0)}}
 
   /* ---------- mobile bottom navigation + sheets ---------- */
   #mnav{display:none}
   @media (max-width:900px), (pointer:coarse) and (max-width:1100px){
     #mnav{position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;
       height:calc(54px + var(--sa-b));padding:0 var(--sa-r) var(--sa-b) var(--sa-l);
-      background:#0a0e14f5;border-top:1px solid var(--line);
+      background:#000000f5;border-top:1px solid var(--line);
       backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
     #mnav button{flex:1;background:none;border:none;color:var(--ink-dim);
       font-size:10px;letter-spacing:.6px;display:flex;flex-direction:column;
@@ -287,55 +276,33 @@
     .sheet-grip{display:block;flex:0 0 auto;padding:8px 0 2px;cursor:grab}
     .sheet-grip::before{content:"";display:block;width:38px;height:4px;border-radius:2px;
       background:#2a3a4d;margin:0 auto}
-    #brand small{display:none}
-    #topbar{gap:8px}
-    .badges{max-width:46vw}
     #sitrep{width:auto!important;margin-left:0!important;left:0!important;right:0!important;
       bottom:calc(54px + var(--sa-b))!important;height:auto!important;max-height:64vh!important}
     #sit-body{grid-template-columns:1fr}
     .maplibregl-ctrl-bottom-right{bottom:calc(58px + var(--sa-b))}
   }
   @media (max-width:520px){
-    .badge{padding:4px 8px;font-size:10px}
-    #search{max-width:none}
+    .badge{padding:3px 6px;font-size:9px}
   }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<div id="topbar">
-  <div id="brand">see<span style="color:var(--accent2)">hear</span> <small>keyless osint</small></div>
-  <form id="search" onsubmit="return doSearch(event)">
-    <input id="q" placeholder="place or lat,lon…" autocomplete="off" enterkeyhint="search">
-    <button class="btn sm" type="submit">GO</button>
-  </form>
-  <button class="btn sm" id="loc-btn" title="center on my location">⌖&nbsp;ME</button>
-  <div class="badges">
-    <div class="badge" id="kp-badge" title="NOAA SWPC planetary K-index (geomagnetic activity)">
-      <span class="dot" id="kp-dot"></span>Kp <b id="kp-val">–</b>
-    </div>
-    <div class="badge" id="xray-badge" title="GOES X-ray flux — current solar flare class">
-      ☀ <b id="xray-val">–</b>
-    </div>
-    <div class="badge" id="kev-badge" title="CISA Known-Exploited Vulnerabilities catalog size (may be CORS-blocked)">
-      KEV <b id="kev-val">–</b>
-    </div>
-    <div class="badge" title="UTC">UTC <b id="utc">--:--</b></div>
-  </div>
-</div>
-
-<!-- layer panel -->
+<!-- objects panel -->
 <div id="layers" class="panel">
   <div class="sheet-grip" data-close="layers"></div>
+  <div id="obj-head">◧ OBJECTS <span class="brand">SEEHEAR</span></div>
   <div id="layers-scroll">
-    <div class="sec-h">Movement</div><div id="grp-move"></div>
-    <div class="sec-h">Hazard / Environment</div><div id="grp-haz"></div>
-    <div class="sec-h">Geopolitics / OSINT</div><div id="grp-geo"></div>
-    <div class="sec-h">Radio nodes</div><div id="grp-radio"></div>
+    <div class="sec-h">Aircraft</div><div id="grp-air"></div>
+    <div class="sec-h">Maritime &amp; rail</div><div id="grp-surface"></div>
+    <div class="sec-h">Space</div><div id="grp-space"></div>
+    <div class="sec-h">Earth &amp; hazard</div><div id="grp-hazard"></div>
+    <div class="sec-h">Conflict &amp; cyber</div><div id="grp-conflict"></div>
+    <div class="sec-h">Signals</div><div id="grp-signals"></div>
   </div>
-  <div id="panel-foot">RIGHT-CLICK / LONG-PRESS THE MAP FOR A DOSSIER<br>
-    <span style="opacity:.7">© OpenStreetMap · © CARTO</span></div>
+  <div id="panel-foot"><a href="#" id="foot-info">RIGHT-CLICK / LONG-PRESS MAP → DOSSIER</a>
+    <span style="opacity:.6"> · © OSM · CARTO</span></div>
 </div>
 
 <!-- radio panel -->
@@ -354,11 +321,8 @@
       <select id="mhz-sys" style="flex:1;min-width:0"><option>loading systems…</option></select>
       <button class="btn sm" id="mhz-scan" title="cycle across systems">scan</button>
     </div>
-    <div class="rpane-head" id="mhz-status">pick a system → live trunked calls auto-play newest-last</div>
+    <div class="rpane-head" id="mhz-status">PICK A SYSTEM → LIVE CALLS AUTO-PLAY</div>
     <div class="rpane-body" id="mhz-list"></div>
-    <div class="note">OpenMHz · trunk-recorded, unencrypted talkgroups only · built-in delay.
-      The JSON API sits behind Cloudflare — if the list stays empty it's an IP challenge;
-      it loads fine from a normal browser. Audio itself is unrestricted.</div>
   </div>
 
   <!-- 2. Shortwave / Ham — full in-page KiwiSDR WebSocket tuner -->
@@ -391,21 +355,14 @@
       </div>
       <div id="tuner-status">select a receiver to begin</div>
     </div>
-    <div class="rpane-head">Public KiwiSDR receivers — tap to tune here in-page.</div>
+    <div class="rpane-head">KIWISDR RECEIVERS — TAP TO TUNE <a href="#" id="hf-info">ⓘ</a></div>
     <div class="rpane-body" id="hf-list"></div>
-    <div class="note">Full in-page tuner: connects over the KiwiSDR WebSocket protocol,
-      decodes its IMA-ADPCM audio, and plays via Web Audio — no plugin, no new tab.
-      Nodes are <b>http/ws</b>, so run seehear from a local file (not an https host) or
-      the browser will block the connection; use “native ↗” as a fallback.</div>
   </div>
 
   <!-- 3. Aviation ATC — LiveATC -->
   <div class="rpane" id="pane-atc">
-    <div class="rpane-head" id="atc-head">LiveATC tower feeds with live METAR weather — ▶ tries inline, ↗ opens LiveATC.</div>
+    <div class="rpane-head" id="atc-head">LIVEATC TOWERS · LIVE METAR — ▶ INLINE, ↗ LIVEATC</div>
     <div class="rpane-body" id="atc-list"></div>
-    <div class="note">LiveATC streams are mp3 and <b>&lt;audio&gt;</b> playback isn't CORS-gated,
-      but LiveATC may reject hotlinks by Referer — ▶ tries inline first, ↗ is the guaranteed
-      fallback. METARs from aviationweather.gov refresh every 5 min.</div>
   </div>
 
   <!-- 4. Broadcast — radio-browser.info (40k+ stations) -->
@@ -416,10 +373,8 @@
         color:var(--ink);padding:8px 10px;border-radius:8px;font-family:var(--mono);font-size:12px">
       <button class="btn sm" id="cast-go">find</button>
     </div>
-    <div class="rpane-head" id="cast-head">Top stations near you — tap to play.</div>
+    <div class="rpane-head" id="cast-head">TOP STATIONS NEAR YOU — TAP TO PLAY</div>
     <div class="rpane-body" id="cast-list"></div>
-    <div class="note">radio-browser.info · 40k+ community-indexed stations worldwide,
-      streamed straight into the player. Toggle “Broadcast stations” on the map to see them plotted.</div>
   </div>
 
   <div id="player">
@@ -432,14 +387,19 @@
 <div id="sitrep" class="panel">
   <div class="sheet-grip" data-close="sitrep"></div>
   <div id="sit-head">
-    <b>◈ SITREP</b>
-    <span class="loc" id="sit-loc">locating…</span>
-    <span class="chev">▾</span>
+    <span class="title" id="sit-title">◈ SITREP</span>
+    <div id="sit-badges">
+      <span class="badge" id="kp-badge" title="Geomagnetic K-index (NOAA SWPC)"><span class="dot" id="kp-dot"></span>Kp <b id="kp-val">–</b></span>
+      <span class="badge" id="xray-badge" title="GOES X-ray flare class">☀ <b id="xray-val">–</b></span>
+      <span class="badge" id="kev-badge" title="CISA known-exploited CVEs">KEV <b id="kev-val">–</b></span>
+      <span class="badge" title="UTC"><b id="utc">--:--</b></span>
+    </div>
+    <span class="loc" id="sit-loc">LOCATING…</span>
+    <button class="btn sm" id="loc-btn" title="center on my location">⌖ ME</button>
+    <span class="chev" id="sit-chev">▾</span>
   </div>
   <div id="sit-body">
-    <div class="sit-empty">Acquiring position and signals…<br>
-    Location is resolved by IP instantly, then refined by GPS if you allow it.
-    Nothing leaves your browser.</div>
+    <div class="sit-empty">ACQUIRING POSITION…</div>
   </div>
 </div>
 
@@ -447,7 +407,7 @@
 <div id="mnav">
   <button data-p="" class="active"><span class="ic">🗺</span>MAP</button>
   <button data-p="sitrep"><span class="ic">◈</span>SITREP</button>
-  <button data-p="layers"><span class="ic">◧</span>LAYERS</button>
+  <button data-p="layers"><span class="ic">◧</span>OBJECTS</button>
   <button data-p="radio"><span class="ic">📡</span>RADIO</button>
 </div>
 
@@ -603,11 +563,10 @@ const PLANE=[[0,-15],[-1.6,-6],[-13,3],[-13,6],[-1.6,3.5],[-1.6,11],[-5,14.5],[-
 const SHIP=[[0,-15],[5.5,-5],[5.5,11],[3,15],[-3,15],[-5.5,11],[-5.5,-5]];
 function addImg(name,data){ if(!gl.hasImage(name)) gl.addImage(name,data,{pixelRatio:2}); }
 function registerIcons(){
-  addImg('ac-allair',shapeIcon('#8fd6ff',PLANE));
-  addImg('ac-mil',   shapeIcon('#ffb454',PLANE));
-  addImg('ac-near',  shapeIcon('#5cc8ff',PLANE));
+  addImg('ac-mil',   shapeIcon('#ff4455',PLANE));   // military = red
+  addImg('ac-near',  shapeIcon('#2fe07a',PLANE));   // civil aircraft = green
   addImg('ac-sos',   shapeIcon('#ff2d55',PLANE,44));
-  addImg('ship',     shapeIcon('#48d1a0',SHIP));
+  addImg('ship',     shapeIcon('#37e0a8',SHIP));
   const E={'ico-fire':'🔥','ico-volcano':'🌋','ico-cyclone':'🌀','ico-flood':'🌊',
     'ico-quake':'🟠','ico-drought':'🏜️','ico-ice':'🧊','ico-storm':'⛈️','ico-dust':'🌫️',
     'ico-launch':'🚀','ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬','ico-iss':'🛰️',
@@ -637,7 +596,7 @@ const USER={lat:null,lon:null,place:'',region:'',cc:'',src:null};
 
 /* ---------------- Movement ---------------- */
 defLayer({
-  id:'quakes', label:'Earthquakes 24h', color:'#ff5c6c', group:'move', refresh:60, sized:true,
+  id:'quakes', label:'Earthquakes 24h', color:'#ff5c6c', group:'hazard', refresh:60, sized:true,
   loader: async ()=>{
     const j=await getJSON('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
     (j.features||[]).forEach(f=>{ f.properties._r=3+(f.properties.mag||0)*2.1; f.properties._kind='quake'; });
@@ -651,34 +610,13 @@ defLayer({
 });
 
 defLayer({
-  id:'allair', label:'All aircraft (in view)', color:'#8fd6ff', group:'move', refresh:20,
-  icon:'ac-allair', rotate:true, iconSize:0.46,
-  // every aircraft inside the current viewport — airplanes.live point query
-  // centered on the map, radius scaled to what's on screen (cap 250 nm)
-  loader: async ()=>{
-    const c=gl.getCenter(), b=gl.getBounds();
-    const radNm=Math.min(250,Math.max(20,
-      havKm(c.lat,c.lng,b.getNorth(),c.lng)/1.852));
-    const j=await adsb(`/point/${c.lat.toFixed(3)}/${c.lng.toFixed(3)}/${Math.round(radNm)}`);
-    return {type:'FeatureCollection',features:acFeatures(j,'allair')};
-  },
-  popup:acPopup
-});
-
-defLayer({
-  id:'mil', label:'Military aircraft', color:'#ffb454', group:'move', refresh:60,
-  icon:'ac-mil', rotate:true, iconSize:0.5,
-  loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')}),
-  popup:acPopup
-});
-
-defLayer({
-  id:'nearair', label:'Aircraft near me', color:'#5cc8ff', group:'move', refresh:45, defaultOff:true,
+  id:'nearair', label:'Aircraft', color:'#2fe07a', group:'air', refresh:30, defaultOff:true,
   icon:'ac-near', rotate:true, iconSize:0.46,
+  // all civil (non-military) aircraft available around the user
   loader: async ()=>{
     if(USER.lat==null) throw new Error('no position fix yet');
-    const j=await adsb(`/point/${USER.lat.toFixed(3)}/${USER.lon.toFixed(3)}/100`);
-    const feats=acFeatures(j,'nearair');
+    const j=await adsb(`/point/${USER.lat.toFixed(3)}/${USER.lon.toFixed(3)}/250`);
+    const feats=acFeatures(j,'nearair').filter(f=>!f.properties.mil);
     feats.forEach(f=>f.properties.km=Math.round(
       havKm(USER.lat,USER.lon,f.geometry.coordinates[1],f.geometry.coordinates[0])));
     return {type:'FeatureCollection',features:feats};
@@ -687,7 +625,14 @@ defLayer({
 });
 
 defLayer({
-  id:'sos', label:'Emergency squawks', color:'#ff2d55', group:'move', refresh:60,
+  id:'mil', label:'Military aircraft', color:'#ff4455', group:'air', refresh:60,
+  icon:'ac-mil', rotate:true, iconSize:0.5,
+  loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')}),
+  popup:acPopup
+});
+
+defLayer({
+  id:'sos', label:'Emergency squawks', color:'#ff2d55', group:'air', refresh:60,
   icon:'ac-sos', rotate:true, iconSize:0.6,
   loader: async ()=>{
     // 7700 = general emergency, 7600 = radio failure, 7500 = unlawful interference
@@ -714,7 +659,7 @@ defLayer({
 });
 
 defLayer({
-  id:'ships', label:'Ships / AIS', color:'#48d1a0', group:'move', refresh:60, defaultOff:true,
+  id:'ships', label:'Ships / AIS', color:'#48d1a0', group:'surface', refresh:60, defaultOff:true,
   icon:'ship', rotate:true, iconSize:0.5,
   note:'Digitraffic AIS is keyless & global-schema but covers the Baltic / Gulf of Finland only — the honest keyless ship feed (global AIS all needs a paid key).',
   loader: async ()=>{
@@ -741,7 +686,7 @@ defLayer({
 });
 
 defLayer({
-  id:'iss', label:'ISS (live)', color:'#ffffff', group:'move', refresh:15, icon:'ico-iss', iconSize:0.62,
+  id:'iss', label:'ISS (live)', color:'#ffffff', group:'space', refresh:15, icon:'ico-iss', iconSize:0.62,
   loader: async ()=>{
     const s=await getJSON('https://api.wheretheiss.at/v1/satellites/25544');
     return {type:'FeatureCollection',features:[{type:'Feature',
@@ -757,7 +702,7 @@ defLayer({
 });
 
 defLayer({
-  id:'sats', label:'Bright satellites', color:'#7ee0ff', group:'move', refresh:60, defaultOff:true,
+  id:'sats', label:'Bright satellites', color:'#7ee0ff', group:'space', refresh:60, defaultOff:true,
   loader: async ()=>{
     // CelesTrak TLEs -> SGP4 propagated to "now", entirely in-browser
     const txt=await getText('https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle');
@@ -769,7 +714,7 @@ defLayer({
 });
 
 defLayer({
-  id:'gps', label:'GPS constellation', color:'#8f9dff', group:'move', refresh:120, defaultOff:true,
+  id:'gps', label:'GPS constellation', color:'#8f9dff', group:'space', refresh:120, defaultOff:true,
   loader: async ()=>{
     const txt=await getText('https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMAT=tle');
     return tleToFC(txt);
@@ -780,7 +725,7 @@ defLayer({
 });
 
 defLayer({
-  id:'starlink', label:'Starlink (SpaceX)', color:'#dff0ff', group:'move', refresh:120, defaultOff:true,
+  id:'starlink', label:'Starlink (SpaceX)', color:'#dff0ff', group:'space', refresh:120, defaultOff:true,
   loader: async ()=>{
     const txt=await getText('https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle');
     const fc=tleToFC(txt);
@@ -795,7 +740,7 @@ defLayer({
 });
 
 defLayer({
-  id:'amtrak', label:'Amtrak trains', color:'#4be08a', group:'move', refresh:60, defaultOff:true, icon:'ico-train', iconSize:0.5,
+  id:'amtrak', label:'Amtrak trains', color:'#4be08a', group:'surface', refresh:60, defaultOff:true, icon:'ico-train', iconSize:0.5,
   loader: async ()=>{
     const j=await getJSON('https://api-v3.amtraker.com/v3/trains');
     const feats=[];
@@ -836,7 +781,7 @@ function tleToFC(txt){
 
 /* ---------------- Hazard / Environment ---------------- */
 defLayer({
-  id:'eonet', label:'Natural events (NASA)', color:'#ff8a3d', group:'haz', refresh:600, colored:true,
+  id:'eonet', label:'Natural events (NASA)', color:'#ff8a3d', group:'hazard', refresh:600, colored:true,
   icon:'ico-fire', iconProp:true, iconSize:0.5,
   loader: async ()=>{
     // NASA EONET v3 — live wildfires, severe storms, volcanoes, ice…  ACAO:*
@@ -869,7 +814,7 @@ defLayer({
 });
 
 defLayer({
-  id:'nws', label:'NWS severe alerts', color:'#ffcb47', group:'haz', refresh:120, geom:'fill',
+  id:'nws', label:'NWS severe alerts', color:'#ffcb47', group:'hazard', refresh:120, geom:'fill',
   loader: async ()=>{
     const j=await getJSON('https://api.weather.gov/alerts/active?status=actual&message_type=alert');
     j.features=(j.features||[]).filter(f=>f.geometry); // zone-only alerts have no polygon
@@ -883,7 +828,7 @@ defLayer({
 });
 
 defLayer({
-  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'haz', refresh:300, defaultOff:true, colored:true,
+  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'hazard', refresh:300, defaultOff:true, colored:true,
   loader: async ()=>{
     // SWPC OVATION model — 1° grid; keep cells with probability >= 40%
     const j=await getJSON('https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',{timeout:25000});
@@ -903,7 +848,7 @@ defLayer({
 });
 
 defLayer({
-  id:'volcano', label:'Holocene volcanoes', color:'#ff8a5c', group:'haz', refresh:0, defaultOff:true, icon:'ico-volcano', iconSize:0.44,
+  id:'volcano', label:'Holocene volcanoes', color:'#ff8a5c', group:'hazard', refresh:0, defaultOff:true, icon:'ico-volcano', iconSize:0.44,
   // Smithsonian GVP's web service is 403/CORS-blocked in browsers, so per the
   // spec's "(static)" tag this is a curated Holocene subset — keyless, no fetch.
   loader: async ()=>({type:'FeatureCollection',features:VOLCANOES.map(v=>({
@@ -915,7 +860,7 @@ defLayer({
 });
 
 defLayer({
-  id:'gdacs', label:'Global disasters', color:'#ff6a3d', group:'haz', refresh:1800, colored:true, defaultOff:true, bg:true,
+  id:'gdacs', label:'Global disasters', color:'#ff6a3d', group:'hazard', refresh:1800, colored:true, bg:true,
   // GDACS — UN/EC global disaster alerts: quakes, cyclones, floods, volcanoes,
   // droughts, wildfires; colour = alert level (green/orange/red). Keyless, CORS *.
   loader: async ()=>{
@@ -942,7 +887,7 @@ defLayer({
 });
 
 defLayer({
-  id:'launch', label:'Rocket launches', color:'#c77dff', group:'haz', refresh:3600, defaultOff:true, icon:'ico-launch', iconSize:0.5,
+  id:'launch', label:'Rocket launches', color:'#c77dff', group:'space', refresh:3600, defaultOff:true, icon:'ico-launch', iconSize:0.5,
   // upcoming orbital launches worldwide, plotted at the pad. Launch Library 2
   // (thespacedevs) — keyless, CORS *, anonymous rate-limited so we poll hourly.
   loader: async ()=>{
@@ -962,7 +907,7 @@ defLayer({
 
 /* ---------------- Geopolitics / OSINT ---------------- */
 defLayer({
-  id:'deepstate', label:'Ukraine frontline', color:'#ff5c6c', group:'geo', refresh:1800, geom:'fill', defaultOff:true,
+  id:'deepstate', label:'Ukraine frontline', color:'#ff5c6c', group:'conflict', refresh:1800, geom:'fill', defaultOff:true,
   loader: async ()=>{
     const j=await getJSON('https://deepstatemap.live/api/history/last');
     let fc=j.map||(Array.isArray(j)&&j[0]&&j[0].map)||j;
@@ -978,7 +923,7 @@ defLayer({
 });
 
 defLayer({
-  id:'gdelt', label:'Conflict events (GDELT)', color:'#c77dff', group:'geo', refresh:21600, defaultOff:true, sized:true,
+  id:'gdelt', label:'Conflict events (GDELT)', color:'#c77dff', group:'conflict', refresh:21600, defaultOff:true, sized:true,
   note:'GDELT geo API often lacks CORS headers — kept with graceful failure so the block is visible, not silent.',
   loader: async ()=>{
     const j=await getJSON('https://api.gdeltproject.org/api/v2/geo/geo?query='+
@@ -999,7 +944,7 @@ defLayer({
 });
 
 defLayer({
-  id:'broadcast', label:'Broadcast stations', color:'#ff7ac2', group:'geo', refresh:0, defaultOff:true, icon:'ico-antenna', iconSize:0.42,
+  id:'broadcast', label:'Broadcast stations', color:'#ff7ac2', group:'signals', refresh:0, defaultOff:true, icon:'ico-antenna', iconSize:0.42,
   // radio-browser.info — 40k+ geolocated internet-radio stations worldwide.
   // Loads the ~600 nearest the viewport centre; click a pin to play in-page.
   loader: async ()=>{
@@ -1024,7 +969,7 @@ defLayer({
 });
 
 defLayer({
-  id:'outages', label:'Internet outages', color:'#ff4d6d', group:'geo', refresh:1800, defaultOff:true, sized:true, colored:true, bg:true,
+  id:'outages', label:'Internet outages', color:'#ff4d6d', group:'conflict', refresh:1800, defaultOff:true, sized:true, colored:true, bg:true,
   note:'IODA (Georgia Tech) internet-outage signals. Its CORS only allows the null origin, so this loads from a local file but may be blocked on an https host — fails gracefully.',
   loader: async ()=>{
     const now=Math.floor(Date.now()/1000), from=now-86400;
@@ -1047,7 +992,7 @@ defLayer({
 });
 
 defLayer({
-  id:'cams', label:'Live cameras', color:'#7ee0ff', group:'geo', refresh:0, defaultOff:true, icon:'ico-cam', iconSize:0.44,
+  id:'cams', label:'Live cameras', color:'#7ee0ff', group:'signals', refresh:0, defaultOff:true, icon:'ico-cam', iconSize:0.44,
   // curated public 24/7 webcams; click opens the live stream in a new tab
   loader: async ()=> ({type:'FeatureCollection',features:CAMS.map(c=>({
     type:'Feature',geometry:{type:'Point',coordinates:[c[2],c[1]]},
@@ -1057,7 +1002,7 @@ defLayer({
 });
 
 defLayer({
-  id:'malware', label:'Malware C2 count', color:'#9b5cff', group:'geo', refresh:300, defaultOff:true,
+  id:'malware', label:'Malware C2 count', color:'#9b5cff', group:'conflict', refresh:300, defaultOff:true,
   note:'abuse.ch sends no CORS header — browser fetch is usually blocked; kept so the block is visible, not silent. No coordinates in the feed, so a count only.',
   loader: async ()=>{
     const j=await getJSON('https://feodotracker.abuse.ch/downloads/ipblocklist.json');
@@ -1134,7 +1079,8 @@ function scheduleLayer(cfg){
 }
 
 function buildLayerPanel(){
-  const groups={move:'#grp-move',haz:'#grp-haz',geo:'#grp-geo'};
+  const groups={air:'#grp-air',surface:'#grp-surface',space:'#grp-space',
+    hazard:'#grp-hazard',conflict:'#grp-conflict',signals:'#grp-signals'};
   LAYERS.forEach(cfg=>{
     LAYER_STATE[cfg.id]={cnt:0,timer:null,on:!cfg.defaultOff,started:!cfg.defaultOff};
     ensureMapLayer(cfg);
@@ -1267,28 +1213,6 @@ async function headOfState(countryName){
 }
 
 /* =====================================================================
-   5. SEARCH — Nominatim forward geocode, or "lat,lon"
-   ===================================================================== */
-async function doSearch(ev){
-  ev.preventDefault();
-  const q=$('#q').value.trim(); if(!q) return false;
-  $('#q').blur();
-  const m=q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
-  if(m){ gl.flyTo({center:[+m[2],+m[1]],zoom:8}); return false; }
-  try{
-    const j=await getJSON('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='+
-      encodeURIComponent(q),{headers:{'Accept-Language':'en'}});
-    if(!j.length){ toast('no match for "'+escapeHtml(q)+'"','warn'); return false; }
-    const r=j[0];
-    gl.flyTo({center:[+r.lon,+r.lat],zoom:9});
-    new maplibregl.Popup().setLngLat([+r.lon,+r.lat])
-      .setHTML('<div class="pop"><h4>'+escapeHtml(r.display_name.split(',')[0])+'</h4>'+
-        '<div class="sub">'+escapeHtml(r.display_name)+'</div></div>').addTo(gl);
-  }catch(e){ toast('geocode failed: '+e.message,'err'); }
-  return false;
-}
-
-/* =====================================================================
    6. STATUS BADGES — Kp, GOES X-ray class, CISA KEV, UTC clock
    ===================================================================== */
 async function loadKp(){
@@ -1384,7 +1308,7 @@ function setMapPadding(){
   }
   const sh=$('#sitrep');
   const bottom=(sh&&sh.offsetParent!==null)?Math.round(sh.getBoundingClientRect().height)+22:24;
-  gl.setPadding({top:60,left:286,right:354,bottom});
+  gl.setPadding({top:20,left:350,right:316,bottom});
 }
 window.addEventListener('resize',()=>{ clearTimeout(window.__pad);
   window.__pad=setTimeout(setMapPadding,200); });
@@ -1620,13 +1544,21 @@ function switchRadioTab(t){
   const btn=document.querySelector(`#radio-tabs button[data-t="${t}"]`);
   if(btn) btn.click();
 }
-$('#sit-head').addEventListener('click',()=>{
-  // collapse toggle on desktop; on mobile the sheet grip handles closing
+// collapse toggle lives on the title + chevron (not the whole header, which
+// now also holds the badges and ⌖ ME button)
+function toggleSitrep(){
   if(!window.matchMedia('(max-width:900px)').matches){
     $('#sitrep').classList.toggle('collapsed');
     setMapPadding();
   }
-});
+}
+$('#sit-title').addEventListener('click',toggleSitrep);
+$('#sit-chev').addEventListener('click',toggleSitrep);
+// info links (explanations moved off-panel into a one-tap toast)
+$('#hf-info')&&$('#hf-info').addEventListener('click',e=>{e.preventDefault();
+  toast('KIWISDR IS AN HTTP/WS PROTOCOL — RUN FROM A LOCAL FILE (NOT HTTPS), OR USE “NATIVE ↗”','warn');});
+$('#foot-info')&&$('#foot-info').addEventListener('click',e=>{e.preventDefault();
+  toast('RIGHT-CLICK (OR LONG-PRESS ON TOUCH) ANY MAP POINT FOR A LOCATION DOSSIER','');});
 
 /* =====================================================================
    7. RADIO DOMAIN 1 — OpenMHz police / fire (THE CORE FEATURE)
@@ -2036,7 +1968,7 @@ async function refreshRadar(){
   }catch(e){ console.warn('[radar]',e.message); }
 }
 function initRadar(){
-  const g=$('#grp-haz');
+  const g=$('#grp-hazard');
   const row=el('div','layer off');
   row.innerHTML=`<input type="checkbox" id="ck-radar">
     <span class="sw" style="color:#3fa9ff;background:#3fa9ff"></span>
@@ -2149,9 +2081,9 @@ function initRadioPins(){
     gl.on('mouseleave',l,()=>gl.getCanvas().style.cursor='');
   });
 
-  const g=$('#grp-radio');
-  [['kiwi','KiwiSDR HF nodes','#37e0c9',KIWI.length],
-   ['atc','LiveATC airports','#ffb454',LIVEATC.length]].forEach(([id,label,color,n])=>{
+  const g=$('#grp-signals');
+  [['kiwi','KiwiSDR receivers','#2fe07a',KIWI.length],
+   ['atc','LiveATC towers','#ff4455',LIVEATC.length]].forEach(([id,label,color,n])=>{
     const row=el('div','layer');
     row.innerHTML=`<input type="checkbox" id="ck-${id}" checked>
       <span class="sw" style="color:${color};background:${color}"></span>
@@ -2184,7 +2116,7 @@ let moveDebounce=null;
 gl.on('moveend',()=>{
   clearTimeout(moveDebounce);
   moveDebounce=setTimeout(()=>{
-    ['allair','broadcast'].forEach(id=>{
+    ['broadcast'].forEach(id=>{
       const st=LAYER_STATE[id];
       if(st&&st.on&&st.started) runLayer(LAYERS.find(l=>l.id===id));
     });

@@ -44,12 +44,15 @@ that refreshes every 60 s:
 - 📻 nearest shortwave receiver with a one-tap OPEN chip
 - 🌌 aurora-visibility hint when Kp ≥ 5 at your latitude
 
-Every row has a VIEW/LISTEN/OPEN/TUNE action. The **⌖ ME** button in the top
-bar recenters on you at any time. The SITREP is a bottom bar spanning the gap
-between the side panels (one-third of the viewport); the map keeps its content
-centred in the open area above it. Position is resolved client-side and never
-leaves the browser except as anonymous lat/lon parameters to the public
-weather APIs.
+Every row has a VIEW/LISTEN/OPEN/TUNE action. The SITREP is a bottom bar
+spanning the gap between the side panels (one-third of the viewport); its
+header carries the space-weather badges (Kp, X-ray flare class), the CISA KEV
+count, a UTC clock, your resolved location, and a **⌖ ME** button that
+recenters on you. The map keeps its content centred in the open area above.
+There is no top chrome — the two side panels (OBJECTS, left; radio, right) and
+the SITREP bar are all anchored to the screen edges. Position is resolved
+client-side and never leaves the browser except as anonymous lat/lon
+parameters to the public weather APIs.
 
 Units are imperial (mi/ft, °F, mph) and the interface is set in a minimalist
 all-caps style, with measurement units left in natural case.
