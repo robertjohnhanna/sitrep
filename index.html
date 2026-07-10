@@ -78,12 +78,12 @@
     border:1px solid var(--line);border-radius:12px;
     backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     display:flex;flex-direction:column;overflow:hidden}
-  #layers{top:calc(var(--topbar-h) + 10px);left:calc(10px + var(--sa-l));width:330px;
-    bottom:calc(10px + var(--sa-b))}
+  #layers{top:calc(var(--sa-t) + 8px);left:calc(8px + var(--sa-l));width:330px;
+    bottom:calc(8px + var(--sa-b))}
   #layers-scroll{overflow-y:auto;padding:8px;-webkit-overflow-scrolling:touch;
     flex:1 1 auto;min-height:0}
-  #radio{top:calc(var(--topbar-h) + 10px);right:calc(10px + var(--sa-r));width:296px;
-    bottom:calc(10px + var(--sa-b))}
+  #radio{top:calc(var(--sa-t) + 8px);right:calc(8px + var(--sa-r));width:296px;
+    bottom:calc(8px + var(--sa-b))}
   #obj-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:11px 12px;
     border-bottom:1px solid var(--line);font-size:12px;letter-spacing:2px;color:var(--accent);
     font-weight:700}
@@ -206,9 +206,14 @@
   /* SITREP: a bottom bar spanning the gap between the two side panels,
      one third of the viewport tall; the map padding keeps content centred
      in the open area above it. */
-  #sitrep{bottom:calc(10px + var(--sa-b));top:auto;margin:0;
-    left:calc(352px + var(--sa-l));right:calc(318px + var(--sa-r));width:auto;
-    height:33vh;max-height:33vh}
+  #sitrep{bottom:calc(8px + var(--sa-b));top:auto;margin:0;
+    left:calc(348px + var(--sa-l));right:calc(314px + var(--sa-r));width:auto;
+    height:34vh;max-height:34vh}
+  #sitrep.expanded{top:calc(var(--sa-t) + 8px);height:auto;max-height:none}
+  #sit-title.anom{color:var(--danger)!important}
+  #sit-exp{color:var(--ink-dim);cursor:pointer;padding:2px 4px;flex:0 0 auto;font-size:11px}
+  #sit-exp:hover,#sit-chev:hover{color:var(--accent)}
+  #sitrep.expanded #sit-exp{color:var(--accent)}
   #sit-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
     gap:0 12px;align-content:start;padding:6px 4px}
   #sit-head{display:flex;align-items:center;gap:10px;padding:9px 12px;
@@ -395,8 +400,9 @@
       <span class="badge" title="UTC"><b id="utc">--:--</b></span>
     </div>
     <span class="loc" id="sit-loc">LOCATING…</span>
-    <button class="btn sm" id="loc-btn" title="center on my location">⌖ ME</button>
-    <span class="chev" id="sit-chev">▾</span>
+    <button class="btn sm" id="loc-btn" title="center map on my location">⌖ ME</button>
+    <span id="sit-exp" title="expand to fill">▲</span>
+    <span class="chev" id="sit-chev" title="minimize">▾</span>
   </div>
   <div id="sit-body">
     <div class="sit-empty">ACQUIRING POSITION…</div>
@@ -500,6 +506,19 @@ function countWithin(srcId,lat,lon,km){
   return (s._data.features||[]).filter(f=>f.geometry&&f.geometry.type==='Point'&&
     havKm(lat,lon,f.geometry.coordinates[1],f.geometry.coordinates[0])<=km).length;
 }
+// map-area (viewport bounds) scoped variants — SITREP reflects only what's in view
+function inBounds(b,lon,lat){return lon>=b.getWest()&&lon<=b.getEast()&&lat>=b.getSouth()&&lat<=b.getNorth();}
+function featsIn(srcId){const s=gl.getSource(srcId);return s&&s._data?(s._data.features||[]):[];}
+function countView(srcId,b){return featsIn(srcId).filter(f=>f.geometry&&f.geometry.type==='Point'&&
+  inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])).length;}
+function nearView(srcId,b,lat,lon){
+  let best=null,bd=Infinity;
+  featsIn(srcId).forEach(f=>{ if(!f.geometry||f.geometry.type!=='Point')return;
+    const [flon,flat]=f.geometry.coordinates;
+    if(!inBounds(b,flon,flat))return;
+    const d=havKm(lat,lon,flat,flon); if(d<bd){bd=d;best={f,km:d};}});
+  return best;
+}
 const escapeHtml = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // WMO weather codes (Open-Meteo) -> label
 const WMO={0:'clear',1:'mostly clear',2:'partly cloudy',3:'overcast',45:'fog',48:'rime fog',
@@ -570,7 +589,7 @@ function registerIcons(){
   const E={'ico-fire':'🔥','ico-volcano':'🌋','ico-cyclone':'🌀','ico-flood':'🌊',
     'ico-quake':'🟠','ico-drought':'🏜️','ico-ice':'🧊','ico-storm':'⛈️','ico-dust':'🌫️',
     'ico-launch':'🚀','ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬','ico-iss':'🛰️',
-    'ico-train':'🚆','ico-cam':'📷','ico-disaster':'⚠️'};
+    'ico-train':'🚆','ico-cam':'📷','ico-disaster':'⚠️','ico-news':'📰'};
   for(const k in E) addImg(k,emojiIcon(E[k]));
 }
 // EONET category -> icon; GDACS type -> icon
@@ -610,18 +629,15 @@ defLayer({
 });
 
 defLayer({
-  id:'nearair', label:'Aircraft', color:'#2fe07a', group:'air', refresh:30, defaultOff:true,
-  icon:'ac-near', rotate:true, iconSize:0.46,
-  // all civil (non-military) aircraft available around the user
+  id:'nearair', label:'Aircraft', color:'#2fe07a', group:'air', refresh:30,
+  icon:'ac-near', rotate:true, iconSize:0.6,
+  // all civil (non-military) aircraft in the current map view (refetched on pan)
   loader: async ()=>{
-    if(USER.lat==null) throw new Error('no position fix yet');
-    const j=await adsb(`/point/${USER.lat.toFixed(3)}/${USER.lon.toFixed(3)}/250`);
-    const feats=acFeatures(j,'nearair').filter(f=>!f.properties.mil);
-    feats.forEach(f=>f.properties.km=Math.round(
-      havKm(USER.lat,USER.lon,f.geometry.coordinates[1],f.geometry.coordinates[0])));
-    return {type:'FeatureCollection',features:feats};
+    const c=gl.getCenter();
+    const j=await adsb(`/point/${c.lat.toFixed(3)}/${c.lng.toFixed(3)}/250`);
+    return {type:'FeatureCollection',features:acFeatures(j,'nearair').filter(f=>!f.properties.mil)};
   },
-  popup:p=>acPopup(p)+`<div class="kv"><span>range</span>${fmtMi(p.km)} from you</div>`
+  popup:acPopup
 });
 
 defLayer({
@@ -1002,6 +1018,28 @@ defLayer({
 });
 
 defLayer({
+  id:'news', label:'Major news', color:'#ffd24d', group:'conflict', refresh:900, defaultOff:true, icon:'ico-news', iconSize:0.5,
+  note:'GDELT global news. Its API is often CORS-blocked/slow from a browser — best-effort, fails gracefully. Articles are placed at their source-country centroid.',
+  loader: async ()=>{
+    const q=encodeURIComponent('(breaking OR crisis OR attack OR war OR strike OR election OR protest OR disaster OR summit)');
+    const j=await getJSON('https://api.gdeltproject.org/api/v2/doc/doc?query='+q+
+      '&mode=artlist&maxrecords=75&format=json&sort=datedesc&timespan=1d',{timeout:12000});
+    const seen={}, feats=[];
+    (j.articles||[]).forEach(a=>{
+      const iso=NAME2ISO[a.sourcecountry]; const ctr=iso&&COUNTRY_CENTROID[iso]; if(!ctr) return;
+      const k=iso, i=seen[k]=(seen[k]||0); seen[k]++;
+      const jx=((i%5)-2)*0.8, jy=(Math.floor(i/5)-2)*0.8; // spread stacked articles
+      feats.push({type:'Feature',geometry:{type:'Point',coordinates:[ctr[1]+jx,ctr[0]+jy]},
+        properties:{_kind:'news',title:a.title||'',url:a.url||'',src:a.domain||a.sourcecountry||''}});
+    });
+    return {type:'FeatureCollection',features:feats};
+  },
+  popup:p=>`<h4>📰 ${escapeHtml(String(p.title).slice(0,70))}</h4>
+    <div class="kv"><span>source</span>${escapeHtml(p.src)}</div>
+    <div class="lnk"><a href="${escapeHtml(p.url)}" target="_blank" rel="noopener">READ ARTICLE ↗</a></div>`
+});
+
+defLayer({
   id:'malware', label:'Malware C2 count', color:'#9b5cff', group:'conflict', refresh:300, defaultOff:true,
   note:'abuse.ch sends no CORS header — browser fetch is usually blocked; kept so the block is visible, not silent. No coordinates in the feed, so a count only.',
   loader: async ()=>{
@@ -1016,6 +1054,8 @@ defLayer({
    3. LAYER RUNTIME — sources, styles, toggles, refresh loop
    ===================================================================== */
 const LAYER_STATE={};
+// icons grow with zoom so they read clearly world-wide and up close
+const iconSize=base=>['interpolate',['linear'],['zoom'],2,base*1.4,6,base*2.2,11,base*3.2];
 
 function ensureMapLayer(cfg){
   const sid='src-'+cfg.id;
@@ -1029,7 +1069,7 @@ function ensureMapLayer(cfg){
   }else if(cfg.icon){
     gl.addLayer({id:'ly-'+cfg.id,type:'symbol',source:sid,layout:{
       'icon-image': cfg.iconProp?['coalesce',['get','_icon'],cfg.icon]:cfg.icon,
-      'icon-size': cfg.iconSize||0.5,
+      'icon-size': iconSize(cfg.iconSize||0.6),
       'icon-rotate': cfg.rotate?['coalesce',['get','_rot'],0]:0,
       'icon-rotation-alignment':'map','icon-pitch-alignment':'map',
       'icon-allow-overlap':true,'icon-ignore-placement':true}});
@@ -1346,11 +1386,8 @@ async function reverseFill(){
 }
 
 function afterFirstFix(){
-  // switch on the aircraft-near-me layer now that a radius exists
-  const ck=$('#ck-nearair');
-  if(ck&&!ck.checked){ ck.checked=true; ck.dispatchEvent(new Event('change')); }
+  // aircraft layer is already view-based & on; just try to tune local audio
   autoTune();
-  if(!sitrepTimer) sitrepTimer=setInterval(sitrepTick,60000);
 }
 
 // Auto-tune OpenMHz to the closest-matching system for the user's area.
@@ -1377,140 +1414,104 @@ function autoTune(){
 }
 
 async function sitrepTick(){
-  if(USER.lat==null) return;
-  const {lat,lon}=USER;
+  // SITREP reflects the CURRENT MAP AREA (viewport bounds), not just the user.
+  const c=gl.getCenter(), b=gl.getBounds();
+  const lat=c.lat, lon=c.lng;
   const rows=[];
   const row=(cls,ic,l1,l2,act)=>rows.push(
     `<div class="sit-row${cls?' '+cls:''}"><span class="ic">${ic}</span>`+
     `<span class="tx"><s1>${l1}</s1>${l2?`<s2>${l2}</s2>`:''}</span>${act||''}</div>`);
-  const feats=id=>{const s=gl.getSource(id);return s&&s._data?(s._data.features||[]):[];};
   const flyBtn=f=>`<button class="act" data-act="fly" data-ll="${f.geometry.coordinates.slice(0,2).join(',')}">VIEW</button>`;
 
-  // -- ANOMALY DETECTION: correlate every feed and surface the outliers --
+  // -- ANOMALIES in view (+ global space weather). No header line: the
+  //    "SITREP" title in the bar turns red when anything is flagged. --
   const anom=[];
-  const sosF=feats('src-sos');
-  if(sosF.length){ const n=nearestIn('src-sos',lat,lon);
-    anom.push(['danger','🚨','AIRCRAFT EMERGENCY',sosF.length+' squawking 7500/7600/7700'+(n?' · nearest '+fmtMi(n.km):''),n?flyBtn(n.f):'']); }
-  const reds=feats('src-gdacs').filter(f=>f.properties.level==='Red'||f.properties.level==='Orange');
-  if(reds.length){ const nr=nearestIn('src-gdacs',lat,lon);
-    anom.push([reds.some(f=>f.properties.level==='Red')?'danger':'alert','🌀','DISASTER ALERT',
-      reds.length+' red/orange active (GDACS)'+(nr?' · nearest '+fmtMi(nr.km):''),nr?flyBtn(nr.f):'']); }
-  const big=feats('src-quakes').filter(f=>(+f.properties.mag)>=5).sort((a,b)=>b.properties.mag-a.properties.mag)[0];
-  if(big) anom.push(['danger','🌍','MAJOR EARTHQUAKE','M'+big.properties.mag+' · '+escapeHtml(String(big.properties.place||'').slice(0,42)),flyBtn(big)]);
+  const sosN=countView('src-sos',b);
+  if(sosN){ const n=nearView('src-sos',b,lat,lon);
+    anom.push(['danger','🚨','AIRCRAFT EMERGENCY',sosN+' squawking 7500/7600/7700'+(n?' · '+fmtMi(n.km):''),n?flyBtn(n.f):'']); }
+  const gRed=featsIn('src-gdacs').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(f.properties.level==='Red'||f.properties.level==='Orange'));
+  if(gRed.length){ const nr=nearView('src-gdacs',b,lat,lon);
+    anom.push([gRed.some(f=>f.properties.level==='Red')?'danger':'alert','🌀','DISASTER ALERT',gRed.length+' red/orange in view'+(nr?' · '+fmtMi(nr.km):''),nr?flyBtn(nr.f):'']); }
+  const bigQ=featsIn('src-quakes').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(+f.properties.mag)>=5).sort((x,y)=>y.properties.mag-x.properties.mag)[0];
+  if(bigQ) anom.push(['danger','🌍','MAJOR EARTHQUAKE','M'+bigQ.properties.mag+' · '+escapeHtml(String(bigQ.properties.place||'').slice(0,42)),flyBtn(bigQ)]);
+  const oNear=nearView('src-outages',b,lat,lon);
+  if(oNear) anom.push(['alert','📡','INTERNET OUTAGE',escapeHtml(oNear.f.properties.name)+' · '+fmtMi(oNear.km),flyBtn(oNear.f)]);
   if(KP!=null&&KP>=5) anom.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' — HF / GPS / grid impact possible','']);
-  if(XRAY&&/^[MX]/.test(XRAY)) anom.push(['alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray — HF radio blackout risk','']);
-  const oF=feats('src-outages');
-  if(oF.length){ const no=nearestIn('src-outages',lat,lon);
-    anom.push(['alert','📡','INTERNET OUTAGES',oF.length+' countries flagged (IODA)'+(no?' · nearest '+fmtMi(no.km):''),no?flyBtn(no.f):'']); }
-  if(anom.length){
-    rows.push('<div class="sit-anom">⚠ ANOMALIES DETECTED</div>');
-    anom.forEach(a=>row(a[0],a[1],a[2],a[3],a[4]));
-    rows.push('<div class="sit-div"></div>');
-  }
+  if(XRAY&&/^[MX]/.test(XRAY)) anom.push(['alert','☀','SOLAR FLARE '+XRAY,'HF radio blackout risk','']);
+  $('#sit-title').classList.toggle('anom',anom.length>0);
+  anom.forEach(a=>row(a[0],a[1],a[2],a[3],a[4]));
 
-  // -- active alerts covering the exact point (NWS = US only) --
-  if(Date.now()-alertCache.t>120000){
-    alertCache={t:Date.now(),d:null};
+  // -- weather alerts for the map centre (NWS, US) --
+  const ck=lat.toFixed(2)+','+lon.toFixed(2);
+  if(alertCache.k!==ck||Date.now()-alertCache.t>120000){
+    alertCache={t:Date.now(),k:ck,d:null};
     try{ alertCache.d=await getJSON(`https://api.weather.gov/alerts/active?point=${lat.toFixed(3)},${lon.toFixed(3)}`,{timeout:10000}); }catch(e){}
   }
   const al=alertCache.d&&alertCache.d.features;
   if(al&&al.length){
     const a=al[0].properties;
     row('danger','⚠',escapeHtml(a.event),
-      al.length>1?('+ '+(al.length-1)+' more alerts at your position'):escapeHtml(String(a.headline||'').slice(0,60)));
-  } else if(USER.cc==='US'||!USER.cc){
-    row('','✓','NO ACTIVE ALERTS','NWS point query — your position clear');
+      al.length>1?('+ '+(al.length-1)+' more alerts in this area'):escapeHtml(String(a.headline||'').slice(0,60)));
   }
 
-  // -- local conditions --
-  if(Date.now()-wxCache.t>600000){
-    wxCache={t:Date.now(),d:null};
+  // -- conditions at the map centre (Open-Meteo, worldwide) --
+  if(wxCache.k!==ck||Date.now()-wxCache.t>600000){
+    wxCache={t:Date.now(),k:ck,d:null};
     try{ const w=await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,wind_speed_10m,weather_code`);
       wxCache.d=w.current; }catch(e){}
   }
   if(wxCache.d) row('','🌦',
     cToF(wxCache.d.temperature_2m)+U('°F')+' · '+kmhToMph(wxCache.d.wind_speed_10m)+U(' mph')+' · '+(WMO[wxCache.d.weather_code]||''),
-    'LOCAL CONDITIONS');
+    'AREA CONDITIONS');
 
-  // -- air picture --
-  const near=gl.getSource('src-nearair');
-  const nearN=near&&near._data?(near._data.features||[]).length:0;
-  if(nearN){
-    const nn=nearestIn('src-nearair',lat,lon);
-    row('','✈',nearN+' AIRCRAFT IN RANGE',
-      nn?('closest '+escapeHtml(nn.f.properties.flight)+' · '+fmtMi(nn.km)+' · '+nn.f.properties.alt+U(' ft')):'' ,
-      `<button class="act" data-act="fly" data-ll="${nn?nn.f.geometry.coordinates.join(','):''}">VIEW</button>`);
-  }
-  const milN=countWithin('src-mil',lat,lon,300);
-  if(milN){
-    const nm=nearestIn('src-mil',lat,lon);
-    row('alert','🎖',milN+' MILITARY AIRCRAFT NEARBY',
-      nm?('closest '+escapeHtml(nm.f.properties.flight)+' · '+fmtMi(nm.km)):'',
-      nm?`<button class="act" data-act="fly" data-ll="${nm.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
-  }
-  const sosSrc=gl.getSource('src-sos');
-  const sosN=sosSrc&&sosSrc._data?(sosSrc._data.features||[]).length:0;
-  if(sosN){
-    const ns=nearestIn('src-sos',lat,lon);
-    row('danger','🚨',sosN+' EMERGENCY SQUAWK'+(sosN>1?'S':'')+' WORLDWIDE',
-      ns?('nearest '+escapeHtml(ns.f.properties.flight)+' ('+ns.f.properties.code+') · '+fmtMi(ns.km)):'',
-      ns?`<button class="act" data-act="fly" data-ll="${ns.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
-  }
-  const shSrc=gl.getSource('src-ships');
-  const shN=shSrc&&shSrc._data?(shSrc._data.features||[]).length:0;
-  if(shN){
-    const nsh=nearestIn('src-ships',lat,lon);
-    row('','🚢',shN+' VESSELS TRACKED',
-      nsh?('nearest MMSI '+escapeHtml(String(nsh.f.properties.mmsi))+' · '+fmtMi(nsh.km)):'',
-      nsh?`<button class="act" data-act="fly" data-ll="${nsh.f.geometry.coordinates.join(',')}">VIEW</button>`:'');
-  }
+  // -- everything else scoped to the map area (nearest-in-view) --
+  const acN=countView('src-nearair',b);
+  if(acN){ const nn=nearView('src-nearair',b,lat,lon);
+    row('','✈',acN+' AIRCRAFT IN VIEW',
+      nn?('closest '+escapeHtml(nn.f.properties.flight)+' · '+fmtMi(nn.km)+' · '+nn.f.properties.alt+U(' ft')):'',
+      nn?flyBtn(nn.f):''); }
+  const milN=countView('src-mil',b);
+  if(milN){ const nm=nearView('src-mil',b,lat,lon);
+    row('alert','🎖',milN+' MILITARY AIRCRAFT IN VIEW',
+      nm?('closest '+escapeHtml(nm.f.properties.flight)+' · '+fmtMi(nm.km)):'', nm?flyBtn(nm.f):''); }
+  const shN=countView('src-ships',b);
+  if(shN){ const nsh=nearView('src-ships',b,lat,lon);
+    row('','🚢',shN+' VESSELS IN VIEW',
+      nsh?('nearest MMSI '+escapeHtml(String(nsh.f.properties.mmsi))+' · '+fmtMi(nsh.km)):'', nsh?flyBtn(nsh.f):''); }
+  const newsN=nearView('src-news',b,lat,lon);
+  if(newsN) row('','📰','NEWS · '+escapeHtml(String(newsN.f.properties.title||'').slice(0,44)),
+    escapeHtml(newsN.f.properties.src||'')+' · '+fmtMi(newsN.km),
+    `<button class="act" data-act="link" data-url="${escapeHtml(newsN.f.properties.url||'')}">READ</button>`);
+  const nq=nearView('src-quakes',b,lat,lon);
+  if(nq) row('','🌍','M'+nq.f.properties.mag+' EARTHQUAKE · '+fmtMi(nq.km),
+    escapeHtml(String(nq.f.properties.place||''))+' · '+fmtTime(nq.f.properties.time),flyBtn(nq.f));
+  const ne=nearView('src-eonet',b,lat,lon);
+  if(ne) row('','🔥',(ne.f.properties.cat||'EVENT').toUpperCase()+' · '+fmtMi(ne.km),
+    escapeHtml(String(ne.f.properties.title||'').slice(0,56)),flyBtn(ne.f));
+  const nd=nearView('src-gdacs',b,lat,lon);
+  if(nd&&!gRed.includes(nd.f)) row('','🌀',(nd.f.properties.type||'DISASTER').toUpperCase()+' · '+fmtMi(nd.km),
+    escapeHtml(String(nd.f.properties.name||'').slice(0,56)),flyBtn(nd.f));
 
-  // -- ground truth --
-  const nq=nearestIn('src-quakes',lat,lon);
-  if(nq) row(nq.km<480?'alert':'','🌍',
-    'M'+nq.f.properties.mag+' EARTHQUAKE · '+fmtMi(nq.km),
-    escapeHtml(String(nq.f.properties.place||''))+' · '+fmtTime(nq.f.properties.time),
-    `<button class="act" data-act="fly" data-ll="${nq.f.geometry.coordinates.slice(0,2).join(',')}">VIEW</button>`);
-  const ng=nearestIn('src-gdacs',lat,lon);
-  if(ng&&ng.km<2400) row(ng.f.properties.level==='Red'?'danger':ng.f.properties.level==='Orange'?'alert':'','🌀',
-    (ng.f.properties.type||'DISASTER').toUpperCase()+' · '+fmtMi(ng.km),
-    escapeHtml(String(ng.f.properties.name||'').slice(0,60)),
-    `<button class="act" data-act="fly" data-ll="${ng.f.geometry.coordinates.join(',')}">VIEW</button>`);
-  const ne=nearestIn('src-eonet',lat,lon);
-  if(ne&&ne.km<2400) row(ne.km<320?'alert':'','🔥',
-    (ne.f.properties.cat||'EVENT').toUpperCase()+' · '+fmtMi(ne.km),
-    escapeHtml(String(ne.f.properties.title||'').slice(0,60)),
-    `<button class="act" data-act="fly" data-ll="${ne.f.geometry.coordinates.join(',')}">VIEW</button>`);
-
-  // -- audio picture --
+  // -- audio available in the map area --
   if(mhzCur){
     const s=mhzSystems.find(x=>x.shortName===mhzCur);
     row('','📟','MONITORING '+escapeHtml(s?(s.name||mhzCur):mhzCur),
-      autoTuned?'auto-tuned to your area · police/fire':'police/fire trunked audio');
-  } else if(mhzSystems.length){
-    row('','📟',mhzSystems.length+' POLICE / FIRE SYSTEMS',
-      'open RADIO → pick or scan',`<button class="act" data-act="police">OPEN</button>`);
+      autoTuned?'auto-tuned to your area':'police / fire trunked audio');
   }
-  const na=nearestIn('src-atc',lat,lon);
+  const na=nearView('src-atc',b,lat,lon);
   if(na) row('','🛬','ATC '+escapeHtml(na.f.properties.name),
     escapeHtml(na.f.properties.icao)+' tower · '+fmtMi(na.km),
     `<button class="act" data-act="atc" data-icao="${escapeHtml(na.f.properties.icao)}">LISTEN</button>`);
-  const nk=nearestIn('src-kiwi',lat,lon);
+  const nk=nearView('src-kiwi',b,lat,lon);
   if(nk) row('','📻','SHORTWAVE RX '+escapeHtml(nk.f.properties.name),
     'in-page HF tuner · '+fmtMi(nk.km),
     `<button class="act" data-act="tune" data-host="${escapeHtml(nk.f.properties.host)}" data-name="${escapeHtml(nk.f.properties.name)}">TUNE</button>`);
-  const bcSrc=gl.getSource('src-broadcast');
-  const bcN=bcSrc&&bcSrc._data?(bcSrc._data.features||[]).length:0;
-  row('','📡',bcN?bcN+' BROADCAST STATIONS':'40K+ BROADCAST STATIONS',
-    'internet radio — click to play',
+  const bcN=countView('src-broadcast',b);
+  if(bcN) row('','📡',bcN+' BROADCAST STATIONS IN VIEW','internet radio — click to play',
     `<button class="act" data-act="cast">OPEN</button>`);
 
-  // -- space weather hint --
-  if(KP!=null&&KP>=5&&Math.abs(lat)>=48)
-    row('alert','🌌','AURORA POSSIBLE TONIGHT','Kp '+KP+' geomagnetic storm in progress');
-
   $('#sit-body').innerHTML=rows.length?rows.join(''):
-    '<div class="sit-empty">No signals resolved yet — feeds are still loading.</div>';
+    '<div class="sit-empty">NO SIGNALS IN THIS AREA — PAN OR ZOOM THE MAP</div>';
 }
 
 // SITREP action chips
@@ -1539,21 +1540,19 @@ $('#sit-body').addEventListener('click',e=>{
     switchRadioTab('police');
     if(window.matchMedia('(max-width:900px)').matches) openSheet('radio');
   }
+  if(act==='link'&&b.dataset.url) window.open(b.dataset.url,'_blank','noopener');
 });
 function switchRadioTab(t){
   const btn=document.querySelector(`#radio-tabs button[data-t="${t}"]`);
   if(btn) btn.click();
 }
-// collapse toggle lives on the title + chevron (not the whole header, which
-// now also holds the badges and ⌖ ME button)
-function toggleSitrep(){
-  if(!window.matchMedia('(max-width:900px)').matches){
-    $('#sitrep').classList.toggle('collapsed');
-    setMapPadding();
-  }
-}
-$('#sit-title').addEventListener('click',toggleSitrep);
-$('#sit-chev').addEventListener('click',toggleSitrep);
+// SITREP has three heights: collapsed (header only), normal, and expanded
+// (fills its whole bay, covering the map vertically). ▾ minimises, ▲ fills.
+const isMobile=()=>window.matchMedia('(max-width:900px)').matches;
+$('#sit-chev').addEventListener('click',()=>{ if(isMobile())return;
+  const s=$('#sitrep'); s.classList.remove('expanded'); s.classList.toggle('collapsed'); setMapPadding(); });
+$('#sit-exp').addEventListener('click',()=>{ if(isMobile())return;
+  const s=$('#sitrep'); s.classList.remove('collapsed'); s.classList.toggle('expanded'); setMapPadding(); });
 // info links (explanations moved off-panel into a one-tap toast)
 $('#hf-info')&&$('#hf-info').addEventListener('click',e=>{e.preventDefault();
   toast('KIWISDR IS AN HTTP/WS PROTOCOL — RUN FROM A LOCAL FILE (NOT HTTPS), OR USE “NATIVE ↗”','warn');});
@@ -1958,7 +1957,9 @@ async function refreshRadar(){
     const tiles=[j.host+frame.path+'/256/{z}/{x}/{y}/4/1_1.png'];
     if(gl.getSource('src-radar')){ gl.getSource('src-radar').setTiles(tiles); }
     else{
-      gl.addSource('src-radar',{type:'raster',tiles,tileSize:256});
+      // RainViewer serves up to z~12; cap maxzoom so MapLibre overzooms
+      // instead of requesting unsupported tiles (fixes blank/error at high zoom)
+      gl.addSource('src-radar',{type:'raster',tiles,tileSize:256,minzoom:0,maxzoom:12});
       // insert just above the basemap so data points stay on top
       const first=gl.getStyle().layers.find(l=>l.id!=='carto');
       gl.addLayer({id:'ly-radar',type:'raster',source:'src-radar',
@@ -2052,7 +2053,7 @@ function initRadioPins(){
     type:'Feature',geometry:{type:'Point',coordinates:[a.lon,a.lat]},
     properties:{_kind:'atc',name:a.name,icao:a.icao,page:a.page}}))};
 
-  const symLayout=img=>({'icon-image':img,'icon-size':0.42,
+  const symLayout=img=>({'icon-image':img,'icon-size':iconSize(0.5),
     'icon-allow-overlap':true,'icon-ignore-placement':true});
   gl.addSource('src-kiwi',{type:'geojson',data:kiwiFC});
   gl.addLayer({id:'ly-kiwi',type:'symbol',source:'src-kiwi',layout:symLayout('ico-radio')});
@@ -2116,11 +2117,13 @@ let moveDebounce=null;
 gl.on('moveend',()=>{
   clearTimeout(moveDebounce);
   moveDebounce=setTimeout(()=>{
-    ['broadcast'].forEach(id=>{
+    // viewport-based feeds refetch for the new area, then the SITREP re-reads it
+    ['nearair','broadcast'].forEach(id=>{
       const st=LAYER_STATE[id];
       if(st&&st.on&&st.started) runLayer(LAYERS.find(l=>l.id===id));
     });
-  },700);
+    sitrepTick();
+  },600);
 });
 
 // mobile: MAP / LAYERS / RADIO bottom nav toggles the panels as sheets
@@ -2159,6 +2162,20 @@ SK:[48.7,19.7],QA:[25.3,51.2],KW:[29.3,47.5],OM:[21.5,55.9],LB:[33.9,35.9],NP:[2
 MN:[46.9,103.8],CU:[21.5,-77.8],DO:[18.7,-70.2],GT:[15.8,-90.2],HN:[15.2,-86.2],NI:[12.9,-85.2],
 CR:[9.7,-83.8],PA:[8.5,-80.8],PY:[-23.4,-58.4],UY:[-32.5,-55.8],SN:[14.5,-14.4],CI:[7.5,-5.5],
 CM:[7.4,12.4],FR:[46.6,2.2]};
+// GDELT sourcecountry (name) -> ISO-2, for placing news at a country centroid
+const NAME2ISO={'United States':'US','United Kingdom':'GB','Canada':'CA','Australia':'AU',
+'India':'IN','China':'CN','Japan':'JP','Germany':'DE','France':'FR','Italy':'IT','Spain':'ES',
+'Russia':'RU','Ukraine':'UA','Brazil':'BR','Mexico':'MX','Argentina':'AR','South Africa':'ZA',
+'Nigeria':'NG','Kenya':'KE','Egypt':'EG','Israel':'IL','Iran':'IR','Iraq':'IQ','Turkey':'TR',
+'Saudi Arabia':'SA','Pakistan':'PK','Bangladesh':'BD','Indonesia':'ID','Philippines':'PH',
+'Vietnam':'VN','Thailand':'TH','Malaysia':'MY','Singapore':'SG','South Korea':'KR',
+'North Korea':'KP','Taiwan':'TW','Netherlands':'NL','Belgium':'BE','Switzerland':'CH',
+'Sweden':'SE','Norway':'NO','Denmark':'DK','Finland':'FI','Poland':'PL','Greece':'GR',
+'Ireland':'IE','Portugal':'PT','Austria':'AT','Czech Republic':'CZ','Romania':'RO',
+'Hungary':'HU','New Zealand':'NZ','Chile':'CL','Colombia':'CO','Peru':'PE','Venezuela':'VE',
+'Afghanistan':'AF','Syria':'SY','Yemen':'YE','Lebanon':'LB','Jordan':'JO','Qatar':'QA',
+'United Arab Emirates':'AE','Kuwait':'KW','Ethiopia':'ET','Ghana':'GH','Morocco':'MA',
+'Algeria':'DZ','Sudan':'SD','Kazakhstan':'KZ','Azerbaijan':'AZ','Georgia':'GE','Cuba':'CU'};
 // [name, lat, lon, live-stream URL] — curated public 24/7 cameras
 const CAMS=[
   ['Times Square, NYC',40.757,-73.986,'https://www.earthcam.com/usa/newyork/timessquare/?cam=tsrobo1'],
@@ -2285,7 +2302,9 @@ gl.on('load',()=>{
   loadKEV();
   setMapPadding();
   locate();
-  setTimeout(setMapPadding,400); // re-measure once the SITREP card has content
+  sitrepTick(); // SITREP works off the map area, even before a location fix
+  if(!sitrepTimer) sitrepTimer=setInterval(sitrepTick,60000);
+  [700,3000,7000].forEach(t=>setTimeout(()=>{ setMapPadding(); sitrepTick(); },t));
   toast('SEEHEAR ONLINE · 4 AUDIO DOMAINS · '+LAYERS.length+' LIVE FEEDS','');
 });
 </script>

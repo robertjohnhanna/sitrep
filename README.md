@@ -28,10 +28,15 @@ you allow the browser prompt — denial is silently tolerated), flies the map to
 your position, drops a pulsing marker, and builds a live **SITREP briefing**
 that refreshes every 60 s:
 
-- **⚠ ANOMALIES DETECTED** — a correlation pass across every feed that
-  surfaces the outliers first: aircraft squawking 7500/7600/7700, red/orange
-  GDACS disaster alerts, M5+ earthquakes, geomagnetic storms (Kp ≥ 5), M/X
-  solar flares, and internet outages — each with a VIEW jump
+The SITREP reflects the **current map area** (viewport), not a fixed point —
+pan or zoom and it re-reads what's in view (nearest ATC tower, KiwiSDR,
+aircraft, ships, quakes, disasters…). It has three heights: minimise (▾),
+normal, and **▲ expand** to fill its whole bay over the map.
+
+- **Anomalies** — a correlation pass across every in-view feed surfaces the
+  outliers at the top (aircraft squawking 7500/7600/7700, red/orange GDACS
+  alerts, M5+ quakes, plus global geomagnetic storms / M-X solar flares).
+  When anything is flagged, the **SITREP title turns red**.
 - ⚠ active weather alerts covering your exact point (NWS point query)
 - 🌦 local conditions (Open-Meteo)
 - ✈ every aircraft within 100 nm of you (auto-enabled layer, adsb.lol)
