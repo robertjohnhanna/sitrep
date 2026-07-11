@@ -621,7 +621,7 @@ defLayer({
       if(!/warning$/i.test(ev)) return;   // WARNINGS only — excludes Watch/Advisory/Statement
       if(!f.geometry) return;             // needs an area polygon to draw
       feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'nws',
-        event:ev,severity:p.severity||'',area:p.areaDesc||'',
+        event:ev,severity:p.severity||'',area:p.areaDesc||'',ends:p.ends||p.expires||'',
         _col:/Extreme/i.test(p.severity)?'#ff2d55':/Severe/i.test(p.severity)?'#ff6a3d':'#ffb454'}});
     });
     return {type:'FeatureCollection',features:feats};
@@ -1077,7 +1077,11 @@ const CATS=[
   {src:'src-nws', hazard:true, icon:'⚠',
    cls:f=>/Extreme|Severe/i.test(f.properties.severity)?'danger':'alert',
    head:f=>cut((f.properties.event||'warning').replace(/\s*warning$/i,'').toUpperCase(),22),
-   sub:f=>cut(f.properties.area,26), detail:f=>cut(f.properties.severity||'active',12)},
+   sub:f=>cut(f.properties.area,26),
+   // line 3 shows when the warning ENDS (the severity is already in the headline
+   // + the card colour, so repeating it here is noise). '' if no end time known.
+   detail:f=>{const e=f.properties.ends,d=e&&new Date(e);
+     return d&&!isNaN(d)?'til '+d.toLocaleTimeString([],Object.assign({hour:'numeric',minute:'2-digit'},tzOpt())):'';}},
   {src:'src-nearair', hazard:false, icon:'✈', cls:()=>'',
    head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'aircraft'), detail:ALT},
@@ -1153,7 +1157,10 @@ async function sitrepTick(){
     }
   }
 
-  // -- GENERAL context cards (area-wide, not a single map point) go FIRST --
+  // -- GENERAL context cards (area-wide, not a single map point). Collected here
+  //    but appended at the BOTTOM of the pile (after the distance-sorted items) —
+  //    they're background context, not the nearest thing to the crosshair. --
+  const general=[];
   // SEVERE WEATHER OUTLOOK (SPC Day 1): is the map-centre under a severe /
   // tornado risk TODAY? "Expected", not yet a warning. US only.
   const spcF=featsIn('src-spc');
@@ -1163,15 +1170,15 @@ async function sitrepTick(){
     const catHit=spcF.filter(f=>f.properties.kind==='cat'&&f.properties.rank>=1&&pointInFeature(f,lon,lat))
       .sort((a,b)=>b.properties.rank-a.properties.rank)[0];
     if(tornHit){ const tp=parseFloat(tornHit.properties.code)||0; const red=tornHit.properties.sig||tp>=0.10;
-      cards.push([red?'danger':'alert','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
+      general.push([red?'danger':'alert','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
         tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',openBtn(SPCU,'SPC'),true]); }
-    if(catHit) cards.push([catHit.properties.rank>=4?'danger':'alert','⛈','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
+    if(catHit) general.push([catHit.properties.rank>=4?'danger':'alert','⛈','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
       'tornado / hail / wind risk',openBtn(SPCU,'SPC'),true]);
   }
   // space weather (global scalars): geomagnetic storm + solar flare
-  if(KP!=null&&KP>=5) cards.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' · K-index',
+  if(KP!=null&&KP>=5) general.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' · K-index',
     'HF / GPS / grid impact',openBtn(SWPC,'SWPC'),true]);
-  if(XRAY&&/^[MX]/.test(XRAY)) cards.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
+  if(XRAY&&/^[MX]/.test(XRAY)) general.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
     'HF radio blackout risk',openBtn(SWPC,'SWPC'),true]);
 
   // -- INDIVIDUAL item cards: one per in-view feature (planes, quakes, fires,
@@ -1191,6 +1198,7 @@ async function sitrepTick(){
       dirMi(pt[1],pt[0])+(det?' · '+det:''),
       llBtn(pt[0],pt[1]), cfg.hazard]);
   });
+  general.forEach(c=>cards.push(c));   // area-wide context cards sink to the bottom
 
   // title severity from HAZARD cards only: 0 none · 1 alert (amber) · 2 warn (red)
   let titleSev=0;
