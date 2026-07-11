@@ -310,7 +310,7 @@
         <div id="emg-name">— locating nearest station —</div>
         <div id="emg-sub"></div>
       </div>
-      <button id="emg-toggle" title="play / pause" aria-label="play"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.52.85l10.5-6.5a1 1 0 0 0 0-1.7L9.52 4.65A1 1 0 0 0 8 5.5z" fill="currentColor"/></svg></button>
+      <button id="emg-toggle" title="play / pause" aria-label="play"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M6 5.5v13a1 1 0 0 0 1.52.85l10.5-6.5a1 1 0 0 0 0-1.7L7.52 4.65A1 1 0 0 0 6 5.5z" fill="currentColor"/></svg></button>
     </div>
     <audio id="audio" preload="none"></audio>
   </div>
@@ -361,15 +361,20 @@ async function getText(url,opts={}){
   try{ const r=await fetch(url,{signal:c.signal}); if(!r.ok)throw new Error('HTTP '+r.status); return await r.text(); }
   finally{ clearTimeout(to); }
 }
-// CelesTrak rate-limits bursts (3-4 rapid requests → HTTP 403), so the space
-// layers (sats/gps/starlink) share a serialized queue that spaces requests ≥2s
-// apart. Without this, loading them together on boot 403'd Starlink → "-".
-let _ctChain=Promise.resolve(), _ctLast=0;
+// CelesTrak rate-limits bursts (verified: 3-4 rapid requests → HTTP 403, but 3
+// spaced ≥4s apart all succeed), so the space layers (sats/gps/starlink) share a
+// serialized queue that keeps requests ≥4s apart. On any error (403/timeout) it
+// backs off 90s so a failed load's retries don't hammer the limit further — the
+// #1 cause of Starlink stuck on "-". Timeout is generous (Starlink is ~1.8 MB).
+let _ctChain=Promise.resolve(), _ctLast=0, _ctCooldownUntil=0;
 function celestrakGet(url,opts={}){
   const p=_ctChain.then(async()=>{
-    const wait=2000-(Date.now()-_ctLast); if(wait>0) await new Promise(r=>setTimeout(r,wait));
+    const now=Date.now();
+    const wait=Math.max(_ctCooldownUntil-now, 4000-(now-_ctLast), 0);
+    if(wait>0) await new Promise(r=>setTimeout(r,wait));
     _ctLast=Date.now();
-    return getText(url,Object.assign({timeout:25000},opts));
+    try{ return await getText(url,Object.assign({timeout:40000},opts)); }
+    catch(e){ _ctCooldownUntil=Date.now()+90000; throw e; }  // back off after a failure
   });
   _ctChain=p.catch(()=>{});   // keep the queue moving even if one request fails
   return p;
@@ -950,13 +955,16 @@ defLayer({
 });
 
 defLayer({
-  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:120, defaultOff:true, icon:'ico-gauge', iconSize:0.5,
-  // USGS live stream gauges in the current view (gauge height, ft)
+  id:'water', label:'River / flood gauges (nearby)', color:'#38d0ff', group:'hazard', refresh:120, defaultOff:true, icon:'ico-gauge', iconSize:0.5,
+  // USGS live stream gauges (gauge height, ft). USGS caps a bBox query at 25
+  // square degrees, so we request a FIXED ~150-mile box (4.9°, = 24 sq°) centred
+  // on the map — always valid, and the count is CONSISTENT at every zoom (gauges
+  // near the map centre, like the aircraft 250-nm scope). USGS can't return a
+  // national total keyless.
   loader: async ()=>{
-    const b=gl.getBounds();
-    if((b.getEast()-b.getWest())>6.5||(b.getNorth()-b.getSouth())>6.5)
-      return {type:'FeatureCollection',features:[]}; // USGS bbox cap — zoom in
-    const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(n=>n.toFixed(3)).join(',');
+    const c=gl.getCenter();
+    const half=2.45;   // degrees; 4.9° box = 24 sq° (< USGS 25 sq° cap)
+    const bbox=[c.lng-half,c.lat-half,c.lng+half,c.lat+half].map(n=>n.toFixed(3)).join(',');
     const j=await getJSON(`https://waterservices.usgs.gov/nwis/iv/?format=json&bBox=${bbox}&parameterCd=00065&siteStatus=active`,{timeout:15000});
     const seen={}, feats=[];
     ((j.value&&j.value.timeSeries)||[]).forEach(ts=>{
@@ -1726,7 +1734,7 @@ let emgCur=null;          // stationuuid currently tuned
 // plays until the user hits ▶ (no surprise autoplay on load).
 let emgPaused=true;       // user intent from the play/pause button
 // crisp centred play / pause glyphs (SVG, not emoji) for the toggle button
-const ICON_PLAY='<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.52.85l10.5-6.5a1 1 0 0 0 0-1.7L9.52 4.65A1 1 0 0 0 8 5.5z" fill="currentColor"/></svg>';
+const ICON_PLAY='<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M6 5.5v13a1 1 0 0 0 1.52.85l10.5-6.5a1 1 0 0 0 0-1.7L7.52 4.65A1 1 0 0 0 6 5.5z" fill="currentColor"/></svg>';
 const ICON_PAUSE='<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></svg>';
 function setEmgIcon(playing){
   const b=$('#emg-toggle');
