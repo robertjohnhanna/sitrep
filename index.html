@@ -1847,6 +1847,10 @@ function refreshViewport(withLabel){
         const st=LAYER_STATE[id];
         if(st&&st.started) runLayer(LAYERS.find(l=>l.id===id));
       });
+      // A center move just refreshed the live viewport data, so restart the 30s
+      // countdown (and the pulse cycle) from now — the next full refresh is a
+      // fresh 30s away, not whatever was left on the clock.
+      refreshBase=Date.now();
     }
     sitrepTick();
     if(withLabel) updateAreaLabel();
