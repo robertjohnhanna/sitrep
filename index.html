@@ -202,14 +202,15 @@
   #loc-btn:active{background:var(--accent);color:#00140a}
   #sit-body{display:flex;flex-direction:column;align-content:start;
     overflow-y:auto;padding:4px 0;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0}
-  /* every SITREP row is a uniform 3-line block: icon · three ellipsised text
-     lines (or a 3-line-clamped news blurb) · an action button. */
+  /* every SITREP row is a uniform 3-line block: icon · three text lines (or a
+     3-line-clamped news blurb) · an action button. Lines CLIP (no "…") — content
+     is written concise enough to fit the width. */
   .sit-row{display:flex;align-items:center;gap:9px;padding:8px 12px;font-size:13px;min-height:62px;
     border-bottom:1px solid #10171f}
   .sit-row .ic{flex:0 0 18px;text-align:center;align-self:flex-start;padding-top:1px}
   .sit-row .tx{flex:1;min-width:0;line-height:1.34;display:flex;flex-direction:column;justify-content:center}
   .sit-row .tx s1,.sit-row .tx s2,.sit-row .tx s3{display:block;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis}
+    overflow:hidden;text-overflow:clip}
   .sit-row .tx s1{color:var(--ink)}
   .sit-row .tx s2,.sit-row .tx s3{color:var(--ink-dim);font-size:12px}
   /* news items are one blurb clamped to exactly three lines */
@@ -282,7 +283,7 @@
 <!-- objects panel -->
 <div id="layers" class="panel">
   <div class="sheet-grip" data-close="layers"></div>
-  <div id="obj-head">◧ MAP DATA <span class="badge" id="utc-badge" title="Coordinated Universal Time" style="margin-left:auto"><b id="utc">--:--</b>&nbsp;UTC</span></div>
+  <div id="obj-head">◧ MAP DATA <span class="badge" id="utc-badge" title="time to next data refresh" style="margin-left:auto"><b id="refresh-count">30</b>s to update</span></div>
   <div id="layers-scroll">
     <div class="sec-h">Aircraft</div><div id="grp-air"></div>
     <div class="sec-h">Maritime &amp; rail</div><div id="grp-surface"></div>
@@ -691,7 +692,7 @@ const USER={lat:null,lon:null,place:'',region:'',cc:'',src:null};
 
 /* ---------------- Movement ---------------- */
 defLayer({
-  id:'nearair', label:'Aircraft (250 nm)', color:'#2fe07a', group:'air', refresh:90,
+  id:'nearair', label:'Aircraft (250 nm)', color:'#2fe07a', group:'air', refresh:30,
   icon:'ac-near', rotate:true, iconSize:0.6,
   // every civil (non-military) aircraft in the current map area; refetched on
   // pan/zoom (see moveend) and once a minute
@@ -702,14 +703,14 @@ defLayer({
 });
 
 defLayer({
-  id:'mil', label:'Military aircraft', color:'#ffce4d', group:'air', refresh:90,
+  id:'mil', label:'Military aircraft', color:'#ffce4d', group:'air', refresh:30,
   icon:'ac-mil', rotate:true, iconSize:0.5,
   loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')}),
   popup:acPopup
 });
 
 defLayer({
-  id:'sos', label:'Emergency squawks', color:'#ff4455', group:'air', refresh:90, bg:true,
+  id:'sos', label:'Emergency squawks', color:'#ff4455', group:'air', refresh:30, bg:true,
   icon:'ac-sos', rotate:true, iconSize:0.6,
   loader: async ()=>{
     // 7700 = general emergency, 7600 = radio failure, 7500 = unlawful interference
@@ -737,7 +738,7 @@ defLayer({
 
 
 defLayer({
-  id:'iss', label:'ISS (live)', color:'#ffffff', group:'space', refresh:22, defaultOff:true, icon:'ico-iss', iconSize:0.62,
+  id:'iss', label:'ISS (live)', color:'#ffffff', group:'space', refresh:30, defaultOff:true, icon:'ico-iss', iconSize:0.62,
   loader: async ()=>{
     const s=await getJSON('https://api.wheretheiss.at/v1/satellites/25544');
     return {type:'FeatureCollection',features:[{type:'Feature',
@@ -753,7 +754,7 @@ defLayer({
 });
 
 defLayer({
-  id:'sats', label:'Bright satellites', color:'#7ee0ff', group:'space', refresh:90, defaultOff:true, icon:'ico-sat', iconSize:0.42,
+  id:'sats', label:'Bright satellites', color:'#7ee0ff', group:'space', refresh:600, defaultOff:true, icon:'ico-sat', iconSize:0.42,
   loader: async ()=>{
     // CelesTrak TLEs -> SGP4 propagated to "now", entirely in-browser
     const txt=await celestrakGet('https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle');
@@ -765,7 +766,7 @@ defLayer({
 });
 
 defLayer({
-  id:'gps', label:'GPS constellation', color:'#8f9dff', group:'space', refresh:180, defaultOff:true, icon:'ico-sat', iconSize:0.42,
+  id:'gps', label:'GPS constellation', color:'#8f9dff', group:'space', refresh:600, defaultOff:true, icon:'ico-sat', iconSize:0.42,
   loader: async ()=>{
     const txt=await celestrakGet('https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMAT=tle');
     return tleToFC(txt);
@@ -776,7 +777,7 @@ defLayer({
 });
 
 defLayer({
-  id:'starlink', label:'Starlink (SpaceX)', color:'#dff0ff', group:'space', refresh:180, defaultOff:true, icon:'ico-sat', iconSize:0.36,
+  id:'starlink', label:'Starlink (SpaceX)', color:'#dff0ff', group:'space', refresh:900, defaultOff:true, icon:'ico-sat', iconSize:0.36,
   loader: async ()=>{
     // full constellation — every Starlink sat, SGP4-propagated in-browser
     const txt=await celestrakGet('https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle');
@@ -788,7 +789,7 @@ defLayer({
 });
 
 defLayer({
-  id:'amtrak', label:'Amtrak trains', color:'#ffce4d', group:'surface', refresh:90, defaultOff:true, icon:'veh-train', iconSize:0.6,
+  id:'amtrak', label:'Amtrak trains', color:'#ffce4d', group:'surface', refresh:30, defaultOff:true, icon:'veh-train', iconSize:0.6,
   loader: async ()=>{
     const j=await getJSON('https://api-v3.amtraker.com/v3/trains');
     const feats=[];
@@ -829,7 +830,7 @@ function tleToFC(txt){
 
 /* ---------------- Hazard / Environment ---------------- */
 defLayer({
-  id:'eonet', label:'Natural events (NASA)', color:'#ff8a3d', group:'hazard', refresh:900, colored:true, defaultOff:true, bg:true,
+  id:'eonet', label:'Natural events (NASA)', color:'#ff8a3d', group:'hazard', refresh:300, colored:true, defaultOff:true, bg:true,
   icon:'ico-fire', iconProp:true, iconSize:0.5,
   loader: async ()=>{
     // NASA EONET v3 — live wildfires, severe storms, volcanoes, ice…  ACAO:*
@@ -878,7 +879,7 @@ defLayer({
 });
 
 defLayer({
-  id:'gdacs', label:'Global disasters', color:'#ff6a3d', group:'hazard', refresh:2700, colored:true, defaultOff:true, bg:true,
+  id:'gdacs', label:'Global disasters', color:'#ff6a3d', group:'hazard', refresh:60, colored:true, defaultOff:true, bg:true,
   // GDACS — UN/EC global disaster alerts: quakes, cyclones, floods, volcanoes,
   // droughts, wildfires; colour = alert level (green/orange/red). Keyless, CORS *.
   loader: async ()=>{
@@ -905,7 +906,7 @@ defLayer({
 });
 
 defLayer({
-  id:'launch', label:'Rocket launches', color:'#c77dff', group:'space', refresh:5400, defaultOff:true, icon:'ico-launch', iconSize:0.5,
+  id:'launch', label:'Rocket launches', color:'#c77dff', group:'space', refresh:3600, defaultOff:true, icon:'ico-launch', iconSize:0.5,
   // upcoming orbital launches worldwide, plotted at the pad. Launch Library 2
   // (thespacedevs) — keyless, CORS *, anonymous rate-limited so we poll hourly.
   loader: async ()=>{
@@ -927,7 +928,7 @@ defLayer({
   // THE earthquake layer (USGS 24h duplicate removed). Real-time global
   // seismicity from EMSC — dots SIZED by magnitude and COLOURED by recency,
   // so a big fresh quake reads instantly. bg-loaded for SITREP anomalies.
-  id:'emsc', label:'Earthquakes (live)', color:'#ff8a5c', group:'hazard', refresh:180,
+  id:'emsc', label:'Earthquakes (live)', color:'#ff8a5c', group:'hazard', refresh:30,
   defaultOff:true, bg:true, sized:true, colored:true,
   loader: async ()=>{
     const j=await getJSON('https://www.seismicportal.eu/fdsnws/event/1/query?limit=1000&format=json&minmag=2',{timeout:15000});
@@ -949,7 +950,7 @@ defLayer({
 });
 
 defLayer({
-  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:900, defaultOff:true, icon:'ico-gauge', iconSize:0.5,
+  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:120, defaultOff:true, icon:'ico-gauge', iconSize:0.5,
   // USGS live stream gauges in the current view (gauge height, ft)
   loader: async ()=>{
     const b=gl.getBounds();
@@ -977,7 +978,7 @@ defLayer({
   // or statements) — the US half of the worldwide warnings picture (GDACS below
   // is the global multi-hazard half). Keyless, CORS *. Polygons where present
   // (tornado / severe-thunderstorm / flash-flood / red-flag warnings carry them).
-  id:'nws', label:'NWS warnings (US)', color:'#ff4455', group:'hazard', refresh:180, ord:1,
+  id:'nws', label:'NWS warnings (US)', color:'#ff4455', group:'hazard', refresh:30, ord:1,
   bg:true, geom:'fill', colored:true,
   loader: async ()=>{
     const j=await getJSON('https://api.weather.gov/alerts/active',{timeout:20000});
@@ -1001,7 +1002,7 @@ defLayer({
 defLayer({
   // SPACE WEATHER (map layer): live auroral oval — NOAA SWPC OVATION model,
   // 1° grid, cells kept where visible-aurora probability ≥ 40%. Keyless, CORS *.
-  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'hazard', refresh:450, colored:true, defaultOff:true,
+  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'hazard', refresh:300, colored:true, defaultOff:true,
   loader: async ()=>{
     const j=await getJSON('https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',{timeout:25000});
     const feats=[];
@@ -1024,7 +1025,7 @@ defLayer({
   // hail, damaging wind — is EXPECTED today. Categorical risk + tornado-prob
   // polygons. Keyless, CORS *. bg-loaded so the SITREP can flag "you're in an
   // Enhanced Risk / tornado-outlook area today" even with the layer hidden.
-  id:'spc', label:'Severe wx outlook (US)', color:'#ffb454', group:'hazard', refresh:2700, ord:2,
+  id:'spc', label:'Severe wx outlook (US)', color:'#ffb454', group:'hazard', refresh:900, ord:2,
   defaultOff:true, bg:true, geom:'fill', colored:true,
   loader: async ()=>{
     const base='https://www.spc.noaa.gov/products/outlook/';
@@ -1091,60 +1092,79 @@ function ensureMapLayer(cfg){
 async function runLayer(cfg){
   const st=LAYER_STATE[cfg.id];
   // Generation token: every call bumps it, and a call only writes data/state if
-  // it's still the newest. Overlapping refreshes (pan + interval + resize) can
+  // it's still the newest. Overlapping refreshes (pan + tick + resize) can
   // finish out of order; without this a slow stale fetch could clobber a fresh
-  // one. The latest request always wins.
+  // one. The latest request always wins. st.loading lets the master scheduler
+  // skip a layer that's still fetching.
   const myGen=++st.gen;
-  if(st.quickTimer){ clearTimeout(st.quickTimer); st.quickTimer=null; }
-  const row=$('#row-'+cfg.id);
-  const cntEl=row&&row.querySelector('.cnt');
-  if(cntEl && !st.retrying) cntEl.innerHTML='<span class="spin"></span>';
-  // up to 3 attempts with exponential backoff before giving up this cycle
-  let lastErr=null;
-  for(let attempt=0;attempt<3;attempt++){
-    try{
-      const fc=await cfg.loader();
-      if(myGen!==st.gen) return;               // superseded by a newer refresh — drop this result
-      const src=gl.getSource('src-'+cfg.id);
-      if(src) src.setData(fc);
-      st.cnt=(fc.features||[]).length;
-      st.at=Date.now(); st.errored=false; st.retrying=false; st.fails=0;
-      if(cntEl) cntEl.textContent=st.cnt;
-      if(row) row.title=cfg.label+' · updated '+fmtTime(st.at);
-      scheduleSitrep();   // SITREP re-reads the fresh data as part of the refresh
-      return;
-    }catch(e){
-      lastErr=e;
-      if(myGen!==st.gen) return;                // a newer refresh owns the layer now
-      if(attempt<2){ st.retrying=true;
-        if(cntEl) cntEl.innerHTML='<span class="spin" title="retry '+(attempt+1)+'…"></span>';
-        await new Promise(r=>setTimeout(r,1200*Math.pow(3,attempt))); // 1.2s, 3.6s
-        if(myGen!==st.gen) return;
+  st.loading=true;
+  try{
+    if(st.quickTimer){ clearTimeout(st.quickTimer); st.quickTimer=null; }
+    const row=$('#row-'+cfg.id);
+    const cntEl=row&&row.querySelector('.cnt');
+    if(cntEl && !st.retrying) cntEl.innerHTML='<span class="spin"></span>';
+    // up to 3 attempts with exponential backoff before giving up this cycle
+    let lastErr=null;
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        const fc=await cfg.loader();
+        if(myGen!==st.gen) return;               // superseded by a newer refresh — drop this result
+        const src=gl.getSource('src-'+cfg.id);
+        if(src) src.setData(fc);
+        st.cnt=(fc.features||[]).length;
+        st.at=Date.now(); st.errored=false; st.retrying=false; st.fails=0;
+        if(cntEl) cntEl.textContent=st.cnt;
+        if(row) row.title=cfg.label+' · updated '+fmtTime(st.at);
+        scheduleSitrep();   // SITREP re-reads the fresh data as part of the refresh
+        return;
+      }catch(e){
+        lastErr=e;
+        if(myGen!==st.gen) return;                // a newer refresh owns the layer now
+        if(attempt<2){ st.retrying=true;
+          if(cntEl) cntEl.innerHTML='<span class="spin" title="retry '+(attempt+1)+'…"></span>';
+          await new Promise(r=>setTimeout(r,1200*Math.pow(3,attempt))); // 1.2s, 3.6s
+          if(myGen!==st.gen) return;
+        }
       }
     }
-  }
-  // Failed this cycle. NEVER wipe what's on the map — keep the existing features
-  // and count, show a neutral dash, and retry with a short bounded backoff
-  // (6→30s) instead of waiting a full refresh interval. This is what stops a
-  // transient hiccup from leaving planes (or any layer) blank for up to a minute.
-  st.errored=true; st.retrying=false; st.fails=(st.fails||0)+1;
-  if(cntEl) cntEl.textContent=st.cnt||'–';
-  console.warn('[layer '+cfg.id+']',lastErr&&lastErr.message);
-  if(st.on && !st.quickTimer){
-    const delay=Math.min(30000,6000*st.fails);
-    st.quickTimer=setTimeout(()=>{ st.quickTimer=null; if(st.on) runLayer(cfg); },delay);
-  }
+    // Failed this cycle. NEVER wipe what's on the map — keep the existing features
+    // and count, show a neutral dash, and retry with a short bounded backoff
+    // (6→30s) instead of waiting a full refresh interval.
+    st.errored=true; st.retrying=false; st.fails=(st.fails||0)+1;
+    if(cntEl) cntEl.textContent=st.cnt||'–';
+    console.warn('[layer '+cfg.id+']',lastErr&&lastErr.message);
+    if(st.on && !st.quickTimer){
+      const delay=Math.min(30000,6000*st.fails);
+      st.quickTimer=setTimeout(()=>{ st.quickTimer=null; if(st.on) runLayer(cfg); },delay);
+    }
+  } finally { if(myGen===st.gen) st.loading=false; }
 }
 
-function scheduleLayer(cfg){
-  const st=LAYER_STATE[cfg.id];
-  runLayer(cfg);                               // initial pull (numbers show even while hidden)
-  if(cfg.refresh>0){
-    if(st.timer) clearInterval(st.timer);
-    // keep refreshing while the layer is visible, or always for bg feeds that
-    // power the SITREP; a hidden layer keeps its loaded count without re-polling
-    st.timer=setInterval(()=>{ if(st.on||cfg.bg) runLayer(cfg); },cfg.refresh*1000);
-  }
+function scheduleLayer(cfg){ runLayer(cfg); }  // initial pull; refreshTick handles ongoing refresh
+
+// ---- unified refresh: a single 30s countdown drives the refresh of every DUE
+//      layer (each still respects its own refresh interval, so rate-limited
+//      feeds like CelesTrak update less often). "Xs to update" reflects the
+//      primary live cadence. ----
+const REFRESH_S=30;
+let refreshBase=Date.now(), pulseCount=0;
+function refreshDueLayers(){
+  pulseCount++;
+  LAYERS.forEach(cfg=>{
+    const st=LAYER_STATE[cfg.id];
+    if(!st||!st.started||cfg.refresh<=0||st.loading) return;
+    if(!(st.on||cfg.bg||cfg.id==='nearair'||cfg.id==='water')) return; // only fetch what's needed
+    // refresh every N pulses (N=refresh/30), grid-aligned so a moveend that
+    // reset a layer's timestamp can't push its refresh past a whole cycle
+    const everyN=Math.max(1,Math.round(cfg.refresh/REFRESH_S));
+    if(pulseCount%everyN===0) runLayer(cfg);
+  });
+}
+function refreshTick(){
+  const el=$('#refresh-count');
+  const elapsed=Math.floor((Date.now()-refreshBase)/1000);
+  if(elapsed>=REFRESH_S){ refreshBase=Date.now(); refreshDueLayers(); if(el) el.textContent=REFRESH_S; }
+  else if(el) el.textContent=REFRESH_S-elapsed;
 }
 
 function buildLayerPanel(){
@@ -1154,7 +1174,7 @@ function buildLayerPanel(){
   // keep their definition order (stable sort)
   LAYERS.slice().sort((a,b)=>(a.ord||99)-(b.ord||99)).forEach(cfg=>{
     LAYER_STATE[cfg.id]={cnt:0,timer:null,on:!cfg.defaultOff,started:!cfg.defaultOff,
-      gen:0,quickTimer:null,fails:0};
+      gen:0,quickTimer:null,fails:0,loading:false};
     ensureMapLayer(cfg);
     const row=el('div','layer'+(cfg.defaultOff?' off':''));
     row.id='row-'+cfg.id;
@@ -1279,13 +1299,10 @@ async function headOfState(countryName){
 }
 
 /* =====================================================================
-   6. UTC CLOCK + SPACE WEATHER (global Kp index, GOES X-ray flare class)
-   NOAA SWPC — keyless, CORS *. Polled every 2 min; surfaced in the SITREP
-   as a conditions row and, when active, as geomagnetic-storm / solar-flare
-   anomalies (the auroral-oval map layer is the visual half).
+   6. SPACE WEATHER (global Kp index, GOES X-ray flare class)
+   NOAA SWPC — keyless, CORS *. Surfaced in the SITREP as geomagnetic-storm /
+   solar-flare anomalies (the auroral-oval map layer is the visual half).
    ===================================================================== */
-setInterval(()=>{ $('#utc').textContent=new Date().toISOString().slice(11,16); },1000);
-$('#utc').textContent=new Date().toISOString().slice(11,16);
 let KP=null, XRAY=null; // latest planetary Kp + GOES X-ray flare class
 async function loadKp(){
   try{
@@ -1489,6 +1506,7 @@ async function sitrepTick(){
   const polyFlyBtn=f=>{const p=polyPt(f);return p?llBtn(p[0],p[1]):'';};
   const openBtn=(url,lbl)=>`<button class="act" data-act="open" data-url="${escapeHtml(url)}">${lbl||'OPEN'}</button>`;
   const dist=f=>fmtMi(havKm(lat,lon,f.geometry.coordinates[1],f.geometry.coordinates[0]));
+  const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));   // concise, no "…"
   const SWPC='https://www.swpc.noaa.gov/', SPCU='https://www.spc.noaa.gov/products/outlook/day1otlk.html';
 
   // -- ANOMALIES in view (+ global space weather). No header line: the
@@ -1499,14 +1517,14 @@ async function sitrepTick(){
   // not just when one is in the map area
   const sosAll=featsIn('src-sos');
   if(sosAll.length){ const n=nearestIn('src-sos',lat,lon);
-    anom.push(['danger','🚨','AIRCRAFT EMERGENCY',sosAll.length+' squawking 7500 / 7600 / 7700',
-      n?('nearest '+escapeHtml(n.f.properties.flight||'?')+' · '+fmtMi(n.km)):'monitoring all emergency codes',
+    anom.push(['danger','🚨','AIRCRAFT EMERGENCY',sosAll.length+' on 7700/7600/7500',
+      n?('nearest '+cut(n.f.properties.flight||'?',8)+' · '+fmtMi(n.km)):'monitoring squawks',
       n?flyBtn(n.f):openBtn('https://globe.adsbexchange.com/','MAP')]); }
   const gRed=featsIn('src-gdacs').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(f.properties.level==='Red'||f.properties.level==='Orange'));
   if(gRed.length){ const nr=nearView('src-gdacs',b,lat,lon);
     anom.push([gRed.some(f=>f.properties.level==='Red')?'danger':'alert','🌀','DISASTER ALERT',
-      gRed.length+' red / orange event'+(gRed.length>1?'s':'')+' in view',
-      nr?(escapeHtml(String(nr.f.properties.name||nr.f.properties.type||'').slice(0,32))+' · '+fmtMi(nr.km)):'GDACS multi-hazard',
+      gRed.length+' red/orange in view',
+      nr?(cut(nr.f.properties.name||nr.f.properties.type,15)+' · '+fmtMi(nr.km)):'GDACS multi-hazard',
       nr?flyBtn(nr.f):'']); }
   const nws=nwsInView(b);
   if(nws.length){
@@ -1514,10 +1532,10 @@ async function sitrepTick(){
     // (tornado, severe-tstorm, flash-flood) → RED; lesser-tagged → amber.
     const red=nws.some(f=>/Extreme|Severe/i.test(f.properties.severity));
     const top=nws.slice().sort((x,y)=>({Extreme:3,Severe:2}[y.properties.severity]||1)-({Extreme:3,Severe:2}[x.properties.severity]||1))[0];
-    anom.push([red?'danger':'alert','⚠','WEATHER WARNING',escapeHtml(String(top.properties.event)),
-      nws.length+' warning'+(nws.length>1?'s':'')+' in view · '+escapeHtml(String(top.properties.severity||'active')),polyFlyBtn(top)]); }
+    anom.push([red?'danger':'alert','⚠','WEATHER WARNING',cut(top.properties.event,24),
+      nws.length+' in view · '+cut(top.properties.severity||'active',10),polyFlyBtn(top)]); }
   const bigQ=featsIn('src-emsc').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(+f.properties.mag)>=5).sort((x,y)=>y.properties.mag-x.properties.mag)[0];
-  if(bigQ) anom.push(['danger','🌍','MAJOR EARTHQUAKE','M'+bigQ.properties.mag+' · '+escapeHtml(String(bigQ.properties.place||'').slice(0,30)),
+  if(bigQ) anom.push(['danger','🌍','MAJOR EARTHQUAKE','M'+bigQ.properties.mag+' · '+cut(bigQ.properties.place,16),
     'depth '+Math.round(bigQ.properties.depth||0)+U(' km')+' · '+fmtTime(bigQ.properties.time),flyBtn(bigQ)]);
 
   // -- WORLDWIDE anomalies: red-level events ANYWHERE, so a global catastrophe
@@ -1525,29 +1543,29 @@ async function sitrepTick(){
   const isIn=f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1]);
   const worldQ=featsIn('src-emsc').filter(f=>(+f.properties.mag)>=6.5&&!isIn(f))
     .sort((x,y)=>y.properties.mag-x.properties.mag)[0];
-  if(worldQ) anom.push(['danger','🌍','MAJOR QUAKE · WORLDWIDE','M'+worldQ.properties.mag+' · '+escapeHtml(String(worldQ.properties.place||'').slice(0,30)),
-    dist(worldQ)+' away · '+fmtTime(worldQ.properties.time),flyBtn(worldQ)]);
+  if(worldQ) anom.push(['danger','🌍','MAJOR QUAKE · WORLDWIDE','M'+worldQ.properties.mag+' · '+cut(worldQ.properties.place,15),
+    dist(worldQ)+' · '+fmtTime(worldQ.properties.time),flyBtn(worldQ)]);
   const worldRed=featsIn('src-gdacs').filter(f=>f.properties.level==='Red'&&!isIn(f));
   if(worldRed.length){ const nr=worldRed.slice().sort((x,y)=>havKm(lat,lon,x.geometry.coordinates[1],x.geometry.coordinates[0])-havKm(lat,lon,y.geometry.coordinates[1],y.geometry.coordinates[0]))[0];
     const pr=nr.properties, raw=String(pr.sev||'').trim();
     // "worldwide" already implies off-map, so line 2 carries the storm detail
-    // (GDACS severity text — e.g. cyclone wind speed) instead of a redundant count
-    const info=(raw&&!/^magnitude 0\b/i.test(raw))?raw:((pr.type||'disaster')+' · '+(pr.level||'')+' alert'+(pr.country?' · '+pr.country:''));
-    const more=worldRed.length>1?' · +'+(worldRed.length-1)+' more':'';
-    anom.push(['danger','🌀','DISASTER · WORLDWIDE',escapeHtml(info.slice(0,66)),
-      escapeHtml(String(pr.name||pr.type||'').slice(0,24))+' · '+dist(nr)+more,flyBtn(nr)]); }
+    // (GDACS severity — e.g. cyclone wind speed) instead of a redundant count
+    const info=(raw&&!/^magnitude 0\b/i.test(raw))?raw:((pr.type||'disaster')+' · '+(pr.level||'')+' alert');
+    const more=worldRed.length>1?' +'+(worldRed.length-1):'';
+    anom.push(['danger','🌀','DISASTER · WORLDWIDE',cut(info,26),
+      cut(pr.name||pr.type,14)+' · '+dist(nr)+more,flyBtn(nr)]); }
   const nwsInSet=new Set(nwsInView(b));
   const worldNws=featsIn('src-nws').filter(f=>/Extreme/i.test(f.properties.severity)&&!nwsInSet.has(f));
-  if(worldNws.length) anom.push(['danger','⚠','EXTREME WARNING · OFF-MAP',escapeHtml(String(worldNws[0].properties.event||'')),
-    worldNws.length+' extreme warning'+(worldNws.length>1?'s':'')+' · '+escapeHtml(String(worldNws[0].properties.area||'').slice(0,24)),polyFlyBtn(worldNws[0])]);
+  if(worldNws.length) anom.push(['danger','⚠','EXTREME WX · OFF-MAP',cut(worldNws[0].properties.event,24),
+    worldNws.length+' extreme · '+cut(worldNws[0].properties.area,14),polyFlyBtn(worldNws[0])]);
 
   // TSUNAMI — always surfaced worldwide (rare + catastrophic): NWS Tsunami
   // Warning polygons and GDACS tsunami events, wherever they are
   const tsu=featsIn('src-nws').filter(f=>/tsunami/i.test(f.properties.event||''))
     .concat(featsIn('src-gdacs').filter(f=>/tsunami/i.test(String(f.properties.type||f.properties.name||''))));
   if(tsu.length){ const p0=polyPt(tsu[0]);
-    anom.push(['danger','🌊','TSUNAMI ALERT',tsu.length+' active tsunami warning'+(tsu.length>1?'s':''),
-      escapeHtml(String(tsu[0].properties.event||tsu[0].properties.name||tsu[0].properties.area||'coastal areas at risk').slice(0,32)),
+    anom.push(['danger','🌊','TSUNAMI ALERT',tsu.length+' tsunami warning'+(tsu.length>1?'s':''),
+      cut(tsu[0].properties.event||tsu[0].properties.name||tsu[0].properties.area||'coastal areas',24),
       p0?llBtn(p0[0],p0[1]):openBtn('https://www.tsunami.gov/','NWS')]); }
 
   // SEVERE WEATHER OUTLOOK (SPC Day 1) — is the map-centre area under a severe /
@@ -1560,17 +1578,17 @@ async function sitrepTick(){
     const catHit=spcF.filter(f=>f.properties.kind==='cat'&&f.properties.rank>=1&&pointInFeature(f,lon,lat))
       .sort((a,b)=>b.properties.rank-a.properties.rank)[0];
     if(tornHit){ const tp=parseFloat(tornHit.properties.code)||0; const red=tornHit.properties.sig||tp>=0.10;
-      anom.push([red?'danger':'alert','🌪️','TORNADO OUTLOOK',escapeHtml(tornHit.properties.label)+' in this area today',
-        tornHit.properties.sig?'significant (EF2+) tornadoes possible':'SPC Day 1 convective outlook',openBtn(SPCU,'SPC')]); }
-    if(catHit) anom.push([catHit.properties.rank>=4?'danger':'alert','⛈','SEVERE WEATHER OUTLOOK',escapeHtml(catHit.properties.label)+' in this area today',
-      'tornado / hail / damaging wind risk',openBtn(SPCU,'SPC')]);
+      anom.push([red?'danger':'alert','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
+        tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',openBtn(SPCU,'SPC')]); }
+    if(catHit) anom.push([catHit.properties.rank>=4?'danger':'alert','⛈','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
+      'tornado / hail / wind risk',openBtn(SPCU,'SPC')]);
   }
 
   // space weather (global, not view-scoped): geomagnetic storm + solar flare
-  if(KP!=null&&KP>=5) anom.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' — planetary K-index',
-    'HF / GPS / power-grid impact possible',openBtn(SWPC,'SWPC')]);
-  if(XRAY&&/^[MX]/.test(XRAY)) anom.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray flux · '+(/^X/.test(XRAY)?'major':'moderate'),
-    'HF radio blackout risk, sunlit side',openBtn(SWPC,'SWPC')]);
+  if(KP!=null&&KP>=5) anom.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' · K-index',
+    'HF / GPS / grid impact',openBtn(SWPC,'SWPC')]);
+  if(XRAY&&/^[MX]/.test(XRAY)) anom.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
+    'HF radio blackout risk',openBtn(SWPC,'SWPC')]);
   // title severity: 0 none · 1 alert (amber) · 2 warning (red)
   let titleSev=0;
   anom.forEach(a=>{ titleSev=Math.max(titleSev,a[0]==='danger'?2:1); row(a[0],a[1],a[2],a[3],a[4],a[5]); });
@@ -1587,25 +1605,25 @@ async function sitrepTick(){
   const acN=countView('src-nearair',b);
   if(acN){ const nn=nearView('src-nearair',b,lat,lon);
     row('','✈',acN+' AIRCRAFT IN VIEW',
-      nn?('nearest '+escapeHtml(nn.f.properties.flight||'?')):'live ADS-B traffic',
-      nn?(fmtMi(nn.km)+' · '+nn.f.properties.alt+U(' ft')+' · '+nn.f.properties.spd+U(' kt')):'',
+      nn?('nearest '+cut(nn.f.properties.flight||'?',8)):'live ADS-B traffic',
+      nn?(fmtMi(nn.km)+' · '+nn.f.properties.alt+U(' ft')):'',
       listBtn('src-nearair','AIRCRAFT IN VIEW')); }
   const milN=countView('src-mil',b);
   if(milN){ const nm=nearView('src-mil',b,lat,lon);
-    row('alert','🎖',milN+' MILITARY AIRCRAFT IN VIEW',
-      nm?('nearest '+escapeHtml(nm.f.properties.flight||'?')+(nm.f.properties.type&&nm.f.properties.type!=='?'?' · '+escapeHtml(nm.f.properties.type):'')):'military ADS-B contacts',
+    row('alert','🎖',milN+' MILITARY IN VIEW',
+      nm?('nearest '+cut(nm.f.properties.flight||'?',8)+(nm.f.properties.type&&nm.f.properties.type!=='?'?' · '+cut(nm.f.properties.type,5):'')):'military ADS-B',
       nm?(fmtMi(nm.km)+' · '+nm.f.properties.alt+U(' ft')):'',listBtn('src-mil','MILITARY IN VIEW')); }
   const nq=nearView('src-emsc',b,lat,lon);
-  if(nq) row('','🌍','M'+nq.f.properties.mag+' EARTHQUAKE',escapeHtml(String(nq.f.properties.place||'').slice(0,34)),
+  if(nq) row('','🌍','M'+nq.f.properties.mag+' EARTHQUAKE',cut(nq.f.properties.place,24),
     fmtMi(nq.km)+' · '+fmtTime(nq.f.properties.time),flyBtn(nq.f));
   // Natural events (wildfires etc.): OPEN the event's source page (like SPC).
   const ne=nearView('src-eonet',b,lat,lon);
-  if(ne) row('','🔥',(ne.f.properties.cat||'EVENT').toUpperCase(),escapeHtml(String(ne.f.properties.title||'').slice(0,34)),
-    fmtMi(ne.km)+' away · NASA EONET',
+  if(ne) row('','🔥',cut((ne.f.properties.cat||'EVENT').toUpperCase(),20),cut(ne.f.properties.title,24),
+    fmtMi(ne.km)+' · NASA EONET',
     openBtn(ne.f.properties.link||('https://www.google.com/search?q='+encodeURIComponent(String(ne.f.properties.title||'natural event'))),'OPEN'));
   const nd=nearView('src-gdacs',b,lat,lon);
-  if(nd&&!gRed.includes(nd.f)) row('','🌀',(nd.f.properties.type||'DISASTER').toUpperCase(),escapeHtml(String(nd.f.properties.name||'').slice(0,34)),
-    fmtMi(nd.km)+' · '+(nd.f.properties.level||'')+(nd.f.properties.country?' · '+escapeHtml(nd.f.properties.country):''),flyBtn(nd.f));
+  if(nd&&!gRed.includes(nd.f)) row('','🌀',cut((nd.f.properties.type||'DISASTER').toUpperCase(),18),cut(nd.f.properties.name,24),
+    fmtMi(nd.km)+' · '+(nd.f.properties.level||'')+(nd.f.properties.country?' · '+cut(nd.f.properties.country,10):''),flyBtn(nd.f));
 
   // -- WORLD NEWS: conflict/disaster/politics/etc. (not map-scoped) — Wikipedia.
   //    One blurb clamped to 3 lines; every item opens its source. --
@@ -1889,6 +1907,7 @@ gl.on('load',()=>{
   // while hidden. Visible + bg layers keep refreshing; hidden ones hold their
   // loaded number until toggled on (see scheduleLayer).
   LAYERS.forEach(cfg=>{ LAYER_STATE[cfg.id].started=true; scheduleLayer(cfg); });
+  refreshBase=Date.now(); setInterval(refreshTick,1000); refreshTick(); // 30s refresh + countdown
   loadEmgPool(); // warm the emergency-broadcast pool so the first fix tunes fast
   loadKp();   setInterval(loadKp,180000);   // space weather: planetary Kp
   loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare
