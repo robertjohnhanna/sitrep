@@ -1140,6 +1140,25 @@ async function sitrepTick(){
 
   const cards=[];   // [cls, icon, l1, l2, l3, action, hazard]
 
+  // -- LOW AIRCRAFT PROXIMITY (top, red-title): any plane (civil / military /
+  //    emergency) within 1 mile of the crosshair AND under 1000' → danger card.
+  //    Uses reported barometric altitude; near ground level that reads as low
+  //    above ground. Ground aircraft report alt='ground'/'?' → skipped. --
+  const lowAc=[];
+  ['src-nearair','src-mil','src-sos'].forEach(s=>featsIn(s).forEach(f=>{
+    const alt=+f.properties.alt; if(!isFinite(alt)||alt>=1000) return;
+    const g=f.geometry&&f.geometry.coordinates; if(!g) return;
+    const km=havKm(lat,lon,g[1],g[0]); if(km>1.609) return;   // within one mile
+    lowAc.push({f,km,alt,pt:g});
+  }));
+  if(lowAc.length){
+    lowAc.sort((a,z)=>a.km-z.km); const lo=lowAc[0], p=lo.f.properties;
+    cards.push(['danger','🛩️','LOW AIRCRAFT',
+      cut(p.flight||p.hex||'aircraft',12)+(lowAc.length>1?' +'+(lowAc.length-1):''),
+      dirMi(lo.pt[1],lo.pt[0])+' · '+lo.alt+U(' ft'),
+      llBtn(lo.pt[0],lo.pt[1]), true]);
+  }
+
   // -- GENERAL context cards (area-wide, not a single map point) go FIRST --
   // SEVERE WEATHER OUTLOOK (SPC Day 1): is the map-centre under a severe /
   // tornado risk TODAY? "Expected", not yet a warning. US only.
