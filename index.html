@@ -174,7 +174,9 @@
   /* minimal stacked entry: callsign / model / distance·alt — no icon, no button.
      Direct-child selectors only, so nested .u unit spans stay inline (else the
      'mi'/'ft' tokens each became their own line and the rows ballooned). */
-  .mrow{padding:7px 14px;border-bottom:1px solid #10171f;line-height:1.3}
+  .mrow{padding:7px 14px;border-bottom:1px solid #10171f;line-height:1.3;cursor:pointer}
+  .mrow:hover{background:var(--panel2)}
+  .mrow:active{background:var(--panel)}
   .mrow>b{color:var(--ink);display:block;font-weight:700;font-size:13px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .mrow>span{color:var(--ink-dim);font-size:12px;display:block;
@@ -481,35 +483,9 @@ const acPopup=p=>`<h4>${p.mil?'🎖':'✈'} ${escapeHtml(p.flight)}</h4>
   <div class="kv"><span>squawk</span>${escapeHtml(p.sq||'—')}</div>
   <div class="kv"><span>hex</span>${escapeHtml(p.hex)}</div>`;
 // nearest feature (Point geometry) in a layer's current data to a lat/lon
-function nearestIn(srcId,lat,lon){
-  const s=gl.getSource(srcId); if(!s||!s._data) return null;
-  let best=null,bd=Infinity;
-  (s._data.features||[]).forEach(f=>{
-    if(!f.geometry||f.geometry.type!=='Point') return;
-    const [flon,flat]=f.geometry.coordinates;
-    const dkm=havKm(lat,lon,flat,flon);
-    if(dkm<bd){bd=dkm;best={f,km:dkm};}
-  });
-  return best;
-}
-function countWithin(srcId,lat,lon,km){
-  const s=gl.getSource(srcId); if(!s||!s._data) return 0;
-  return (s._data.features||[]).filter(f=>f.geometry&&f.geometry.type==='Point'&&
-    havKm(lat,lon,f.geometry.coordinates[1],f.geometry.coordinates[0])<=km).length;
-}
 // map-area (viewport bounds) scoped variants — SITREP reflects only what's in view
 function inBounds(b,lon,lat){return lon>=b.getWest()&&lon<=b.getEast()&&lat>=b.getSouth()&&lat<=b.getNorth();}
 function featsIn(srcId){const s=gl.getSource(srcId);return s&&s._data?(s._data.features||[]):[];}
-function countView(srcId,b){return featsIn(srcId).filter(f=>f.geometry&&f.geometry.type==='Point'&&
-  inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])).length;}
-function nearView(srcId,b,lat,lon){
-  let best=null,bd=Infinity;
-  featsIn(srcId).forEach(f=>{ if(!f.geometry||f.geometry.type!=='Point')return;
-    const [flon,flat]=f.geometry.coordinates;
-    if(!inBounds(b,flon,flat))return;
-    const d=havKm(lat,lon,flat,flon); if(d<bd){bd=d;best={f,km:d};}});
-  return best;
-}
 // Bounds of the map area actually VISIBLE between the docked side panels.
 // gl.getBounds() spans the whole canvas — including the 320px strips hidden
 // under the OBJECTS / SITREP panels — so it over-counts "in view" (SITREP said
@@ -550,15 +526,7 @@ function pointInFeature(f,lon,lat){
   }
   return false;
 }
-// NWS warnings (fill polygons) overlapping the current view — any vertex in bounds
-function nwsInView(b){
-  return featsIn('src-nws').filter(f=>{
-    const g=f.geometry; if(!g) return false;
-    const rings = g.type==='Polygon'?g.coordinates : g.type==='MultiPolygon'?g.coordinates.flat() : [];
-    return rings.some(r=>r.some(pt=>inBounds(b,pt[0],pt[1])));
-  });
-}
-const escapeHtml = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const escapeHtml =s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // One concise, consistent location label everywhere: "PLACE, XX" — XX is a short
 // region code (US state, else country). No "· GPS/IP" or coords suffix; that
@@ -1619,6 +1587,92 @@ async function reverseFill(){
   }catch(e){}
 }
 
+// concise text, no "…" (CSS clips); clean GDACS storm name
+const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));
+const gName=p=>p.eventname||p.name||p.type||'event';
+
+// -- CATEGORY MODEL --------------------------------------------------------
+// Every hazard/traffic feed renders as ONE uniform SITREP card (same shape as
+// the aircraft card): "N NAME IN VIEW/GLOBAL" · nearest one · direction+distance
+// +datum, and >1 item opens a clickable LIST (fly to each on the map). Each cfg
+// is pure property-formatting; distance/bearing is added by the card/list code.
+//   scope : 'view'  → only items inside the current map area
+//           'global'→ counted worldwide (rare, critical: emergencies, disasters)
+//   cls(scoped) → '', 'alert' (amber) or 'danger' (red) for the WORST in scope
+//   hazard: contributes to the SITREP title colour (traffic layers don't)
+//   head : the nearest one's headline (line 2 / list bold)
+//   sub  : list-only secondary line ('' to omit)
+//   detail: the extra datum on line 3 / list ('' to omit)
+const ALT=f=>{const a=f.properties.alt;return a!=null&&a!=='?'?a+U(' ft'):'—';};
+const CATS=[
+  {src:'src-sos', hazard:true, scope:'global', icon:'🚨',
+   one:'AIRCRAFT EMERGENCY', many:'AIRCRAFT EMERGENCIES', cls:()=>'danger',
+   head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
+   sub:f=>'', detail:f=>'squawk '+(f.properties.sq||'7700/7600/7500')},
+  {src:'src-nws', hazard:true, scope:'view', icon:'⚠',
+   one:'WEATHER WARNING', many:'WEATHER WARNINGS',
+   cls:a=>a.some(f=>/Extreme|Severe/i.test(f.properties.severity))?'danger':'alert',
+   // the warning LIST orders by severity (Extreme→Minor), most dangerous first
+   rank:f=>({extreme:4,severe:3,moderate:2,minor:1}[String(f.properties.severity||'').toLowerCase()]||0),
+   head:f=>cut((f.properties.event||'warning').replace(/\s*warning$/i,'').toUpperCase(),22),
+   sub:f=>cut(f.properties.area,26), detail:f=>cut(f.properties.severity||'active',12)},
+  {src:'src-emsc', hazard:true, scope:'view', icon:'🌍',
+   one:'EARTHQUAKE', many:'EARTHQUAKES',
+   cls:a=>a.some(f=>+f.properties.mag>=5)?'danger':a.some(f=>+f.properties.mag>=4)?'alert':'',
+   head:f=>'M'+f.properties.mag+' · '+cut(f.properties.place,16),
+   sub:f=>'depth '+Math.round(f.properties.depth||0)+U(' km'),
+   detail:f=>fmtTime(f.properties.time)},
+  {src:'src-eonet', hazard:true, scope:'view', icon:'🔥',
+   one:'NATURAL EVENT', many:'NATURAL EVENTS', cls:()=>'',
+   head:f=>cut(f.properties.title,20), sub:f=>'',
+   detail:f=>cut((f.properties.cat||'natural event'),16)},
+  {src:'src-gdacs', hazard:true, scope:'global', icon:'🌀',
+   one:'DISASTER', many:'DISASTERS',
+   cls:a=>a.some(f=>f.properties.level==='Red')?'danger':a.some(f=>f.properties.level==='Orange')?'alert':'',
+   head:f=>cut(gName(f.properties),18),
+   sub:f=>cut((f.properties.type||'event')+(f.properties.country?' · '+f.properties.country:''),26),
+   detail:f=>cut(f.properties.level||f.properties.type||'',14)},
+  {src:'src-nearair', hazard:false, scope:'view', icon:'✈',
+   one:'AIRCRAFT', many:'AIRCRAFT', cls:()=>'',
+   head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
+   sub:f=>escapeHtml(f.properties.desc||f.properties.type||'aircraft'), detail:ALT},
+  {src:'src-mil', hazard:false, scope:'view', icon:'🎖', mil:true,
+   one:'MILITARY AIRCRAFT', many:'MILITARY AIRCRAFT', cls:()=>'alert',
+   head:f=>cut(f.properties.flight||f.properties.hex||'?',10),
+   sub:f=>escapeHtml(f.properties.desc||f.properties.type||'military'), detail:ALT},
+];
+const catOf=src=>CATS.find(c=>c.src===src);
+// is a point/polygon feature inside the given view bounds?
+function featInBounds(f,b){
+  const g=f.geometry; if(!g) return false;
+  if(g.type==='Point') return inBounds(b,g.coordinates[0],g.coordinates[1]);
+  const rings=g.type==='Polygon'?g.coordinates:g.type==='MultiPolygon'?g.coordinates.flat():[];
+  return rings.some(r=>r.some(pt=>inBounds(b,pt[0],pt[1])));
+}
+// items of a category currently in scope (view / global)
+function catItems(cfg,b){
+  let items=featsIn(cfg.src); if(cfg.filter) items=items.filter(cfg.filter);
+  return cfg.scope==='global'?items:items.filter(f=>featInBounds(f,b));
+}
+// LIST modal body: every item in scope, nearest-first, each a clickable row
+// (fly to its location). Generalises the old aircraft-only roster.
+function catListHTML(srcId){
+  const cfg=catOf(srcId); if(!cfg) return '<div class="sit-empty">NONE</div>';
+  const c=gl.getCenter(), b=viewBounds();
+  const rLat=USER.lat!=null?USER.lat:c.lat, rLon=USER.lon!=null?USER.lon:c.lng;
+  const rows=catItems(cfg,b).map(f=>{const pt=polyPt(f);
+      return pt?{f,pt,km:havKm(rLat,rLon,pt[1],pt[0])}:null;})
+    .filter(Boolean).sort((x,y)=> cfg.rank ? (cfg.rank(y.f)-cfg.rank(x.f))||(x.km-y.km) : x.km-y.km);
+  if(!rows.length) return '<div class="sit-empty">NONE IN THIS AREA</div>';
+  return rows.map(({f,pt,km})=>{
+    const dir=compass(bearing(rLat,rLon,pt[1],pt[0]));
+    const sub=cfg.sub?cfg.sub(f):'', det=cfg.detail?cfg.detail(f):'';
+    return `<div class="mrow${cfg.mil?' mil':''}" data-act="fly" data-ll="${pt[0]+','+pt[1]}">`+
+      `<b>${cfg.head(f)}</b>`+(sub?`<span>${sub}</span>`:'')+
+      `<span>${dir} ${fmtMi(km)}${det?' · '+det:''}</span></div>`;
+  }).join('');
+}
+
 let sitrepGen=0;
 async function sitrepTick(){
   // SITREP reflects the CURRENT MAP AREA (viewport bounds), not just the user.
@@ -1634,30 +1688,35 @@ async function sitrepTick(){
     `${act||''}</div>`);
   const llBtn=(lo,la,lbl)=>isFinite(lo)&&isFinite(la)?`<button class="act" data-act="fly" data-ll="${lo+','+la}">${lbl||'VIEW'}</button>`:'';
   const flyBtn=f=>llBtn(f.geometry.coordinates[0],f.geometry.coordinates[1]);
-  const polyFlyBtn=f=>{const p=polyPt(f);return p?llBtn(p[0],p[1]):'';};
   const openBtn=(url,lbl)=>`<button class="act" data-act="open" data-url="${escapeHtml(url)}">${lbl||'OPEN'}</button>`;
   // Distance strings are "from me": bearing + range from the user's location
   // (falling back to map center before a fix), e.g. "NW 180 mi".
   const refLat=USER.lat!=null?USER.lat:lat, refLon=USER.lon!=null?USER.lon:lon;
   const dirMi=(la,lo)=>compass(bearing(refLat,refLon,la,lo))+' '+fmtMi(havKm(refLat,refLon,la,lo));
   const dist=f=>dirMi(f.geometry.coordinates[1],f.geometry.coordinates[0]);
-  const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));   // concise, no "…"
-  const gName=p=>p.eventname||p.name||p.type||'event';   // clean GDACS storm name (e.g. "BAVI-26" not "Tropical Cyclone BAVI-26")
   const SWPC='https://www.swpc.noaa.gov/', SPCU='https://www.spc.noaa.gov/products/outlook/day1otlk.html';
 
-  // -- ANOMALIES in view (+ global space weather). No header line: the
-  //    "SITREP" title in the bar turns red when anything is flagged.
-  //    Each entry: [cls, icon, line1, line2, line3, action] --
-  const anom=[];
-  // aircraft emergencies are always surfaced WORLDWIDE (they're rare + critical),
-  // not just when one is in the map area
-  const sosAll=featsIn('src-sos');
-  if(sosAll.length){ const n=nearestIn('src-sos',lat,lon);
-    anom.push(['danger','🚨','AIRCRAFT EMERGENCY',sosAll.length+' on 7700/7600/7500',
-      n?(dist(n.f)+' · '+cut(n.f.properties.flight||'?',8)):'monitoring squawks',
-      n?flyBtn(n.f):openBtn('https://globe.adsbexchange.com/','MAP')]); }
-  // LOW OVERFLIGHT: any aircraft (civil / military / emergency) within ~1 mile of
-  // ME and low above ground. AGL = aircraft MSL altitude − my ground elevation.
+  // -- CARDS: one uniform card per category, plus a few special safety cards.
+  //    Each entry: [cls, icon, l1, l2, l3, action, hazard]. `hazard` cards
+  //    colour the SITREP title; traffic (aircraft/military) don't. --
+  const listBtn=(src,title)=>`<button class="act" data-act="list" data-src="${src}" data-title="${escapeHtml(title)}">LIST</button>`;
+  const cards=[];
+  // standard count / nearest / direction+distance+datum card for a category
+  function catCard(cfg){
+    const scoped=catItems(cfg,b); if(!scoped.length) return;
+    let near=null,nd=Infinity;
+    scoped.forEach(f=>{const pt=polyPt(f); if(!pt) return;
+      const d=havKm(refLat,refLon,pt[1],pt[0]); if(d<nd){nd=d;near={f,pt};}});
+    const n=scoped.length, det=near?cfg.detail(near.f):'';
+    const l1=n+' '+(n===1?cfg.one:cfg.many)+(cfg.scope==='global'?' GLOBAL':' IN VIEW');
+    cards.push([cfg.cls?cfg.cls(scoped):'',cfg.icon,l1,
+      near?'nearest '+cfg.head(near.f):'—',
+      near?dirMi(near.pt[1],near.pt[0])+(det?' · '+det:''):'',
+      n>1?listBtn(cfg.src,l1):(near?llBtn(near.pt[0],near.pt[1]):''),
+      cfg.hazard]);
+  }
+  // LOW OVERFLIGHT — proximity safety alert (not a count): any aircraft within
+  // ~1 mile of ME and low above ground. AGL = MSL altitude − my ground elevation.
   // < 1000' AGL → alert (amber); < 500' AGL → warning (red).
   if(USER.lat!=null){
     const low=[];
@@ -1667,76 +1726,17 @@ async function sitrepTick(){
       if(km>1.609) return;                      // within one mile of me
       low.push({f,km,agl:a-(USER.elevFt||0)});
     }));
-    if(low.length){
-      low.sort((x,y)=>x.agl-y.agl);
-      const lo=low[0];
+    if(low.length){ low.sort((x,y)=>x.agl-y.agl); const lo=low[0];
       if(lo.agl<1000){ const p=lo.f.properties;
-        anom.push([lo.agl<500?'danger':'alert','🛩️','LOW OVERFLIGHT',
+        cards.push([lo.agl<500?'danger':'alert','🛩️','LOW OVERFLIGHT',
           low.length+' within 1 mi · '+cut(p.flight||p.type||'aircraft',10),
-          dist(lo.f)+' · '+Math.max(0,Math.round(lo.agl))+U(' ft')+' AGL',flyBtn(lo.f)]); }
+          dist(lo.f)+' · '+Math.max(0,Math.round(lo.agl))+U(' ft')+' AGL',flyBtn(lo.f),true]); }
     }
   }
-  const gRed=featsIn('src-gdacs').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(f.properties.level==='Red'||f.properties.level==='Orange'));
-  if(gRed.length){ const nr=nearView('src-gdacs',b,lat,lon);
-    anom.push([gRed.some(f=>f.properties.level==='Red')?'danger':'alert','🌀','DISASTER ALERT',
-      gRed.length+' red/orange in view',
-      nr?(dist(nr.f)+' · '+cut(gName(nr.f.properties),15)):'GDACS multi-hazard',
-      nr?flyBtn(nr.f):'']); }
-  const nws=nwsInView(b);
-  if(nws.length){
-    // A live NWS *warning* is imminent-threat by definition. When several are in
-    // view, list them SORTED BY SEVERITY (Extreme→Severe→Moderate→Minor), most
-    // dangerous first, each its own row. Extreme/Severe → RED; lesser → amber.
-    // Capped so a swarm of advisories can't flood the SITREP (rest → "+N more").
-    const sevRank=s=>({extreme:4,severe:3,moderate:2,minor:1}[String(s||'').toLowerCase()]||0);
-    const sorted=nws.slice().sort((x,y)=>sevRank(y.properties.severity)-sevRank(x.properties.severity)
-      || String(x.properties.event||'').localeCompare(String(y.properties.event||'')));
-    const SHOW=4;
-    sorted.slice(0,SHOW).forEach((f,i)=>{ const p=f.properties;
-      const hi=/Extreme|Severe/i.test(p.severity);
-      const pt=polyPt(f), d=pt?dirMi(pt[1],pt[0]):'';
-      const more=(i===SHOW-1&&sorted.length>SHOW)?' · +'+(sorted.length-SHOW)+' more':'';
-      // drop the redundant " Warning" suffix (icon + red already say "warning"),
-      // so long events read cleanly instead of truncating to "…WARN"
-      const ev=(p.event||'WEATHER WARNING').replace(/\s*warning$/i,'')||'WEATHER WARNING';
-      anom.push([hi?'danger':'alert','⚠',cut(ev.toUpperCase(),24),
-        cut(p.severity||'active',12)+more,
-        (d?d+' · ':'')+cut(p.area,22),polyFlyBtn(f)]); }); }
-  const bigQ=featsIn('src-emsc').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(+f.properties.mag)>=5).sort((x,y)=>y.properties.mag-x.properties.mag)[0];
-  if(bigQ) anom.push(['danger','🌍','MAJOR EARTHQUAKE','M'+bigQ.properties.mag+' · '+cut(bigQ.properties.place,16),
-    'depth '+Math.round(bigQ.properties.depth||0)+U(' km')+' · '+fmtTime(bigQ.properties.time),flyBtn(bigQ)]);
+  // hazard categories: emergencies, weather warnings, quakes, natural events, disasters
+  CATS.filter(c=>c.hazard).forEach(catCard);
 
-  // -- WORLDWIDE anomalies: red-level events ANYWHERE, so a global catastrophe
-  //    still turns the SITREP red even when the map is looking elsewhere. --
-  const isIn=f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1]);
-  const worldQ=featsIn('src-emsc').filter(f=>(+f.properties.mag)>=6.5&&!isIn(f))
-    .sort((x,y)=>y.properties.mag-x.properties.mag)[0];
-  if(worldQ) anom.push(['danger','🌍','MAJOR QUAKE · WORLDWIDE','M'+worldQ.properties.mag+' · '+cut(worldQ.properties.place,15),
-    dist(worldQ)+' · '+fmtTime(worldQ.properties.time),flyBtn(worldQ)]);
-  const worldRed=featsIn('src-gdacs').filter(f=>f.properties.level==='Red'&&!isIn(f));
-  if(worldRed.length){ const nr=worldRed.slice().sort((x,y)=>havKm(lat,lon,x.geometry.coordinates[1],x.geometry.coordinates[0])-havKm(lat,lon,y.geometry.coordinates[1],y.geometry.coordinates[0]))[0];
-    const pr=nr.properties, raw=String(pr.sev||'').trim();
-    // "worldwide" already implies off-map, so line 2 carries the storm detail
-    // (GDACS severity — e.g. cyclone wind speed) instead of a redundant count
-    const info=(raw&&!/^magnitude 0\b/i.test(raw))?raw:((pr.type||'disaster')+' · '+(pr.level||'')+' alert');
-    const more=worldRed.length>1?' +'+(worldRed.length-1):'';
-    anom.push(['danger','🌀','DISASTER · WORLDWIDE',cut(info,26),
-      dist(nr)+' · '+cut(gName(pr),16)+more,flyBtn(nr)]); }
-  const nwsInSet=new Set(nwsInView(b));
-  const worldNws=featsIn('src-nws').filter(f=>/Extreme/i.test(f.properties.severity)&&!nwsInSet.has(f));
-  if(worldNws.length) anom.push(['danger','⚠','EXTREME WX · OFF-MAP',cut(worldNws[0].properties.event,24),
-    worldNws.length+' extreme · '+cut(worldNws[0].properties.area,14),polyFlyBtn(worldNws[0])]);
-
-  // TSUNAMI — always surfaced worldwide (rare + catastrophic): NWS Tsunami
-  // Warning polygons and GDACS tsunami events, wherever they are
-  const tsu=featsIn('src-nws').filter(f=>/tsunami/i.test(f.properties.event||''))
-    .concat(featsIn('src-gdacs').filter(f=>/tsunami/i.test(String(f.properties.type||f.properties.name||''))));
-  if(tsu.length){ const p0=polyPt(tsu[0]);
-    anom.push(['danger','🌊','TSUNAMI ALERT',tsu.length+' tsunami warning'+(tsu.length>1?'s':''),
-      cut(tsu[0].properties.event||tsu[0].properties.name||tsu[0].properties.area||'coastal areas',24),
-      p0?llBtn(p0[0],p0[1]):openBtn('https://www.tsunami.gov/','NWS')]); }
-
-  // SEVERE WEATHER OUTLOOK (SPC Day 1) — is the map-centre area under a severe /
+  // SEVERE WEATHER OUTLOOK (SPC Day 1): is the map-centre under a severe /
   // tornado risk TODAY? "Expected", not yet a warning. US only.
   const spcF=featsIn('src-spc');
   if(spcF.length){
@@ -1746,52 +1746,27 @@ async function sitrepTick(){
     const catHit=spcF.filter(f=>f.properties.kind==='cat'&&f.properties.rank>=1&&pointInFeature(f,lon,lat))
       .sort((a,b)=>b.properties.rank-a.properties.rank)[0];
     if(tornHit){ const tp=parseFloat(tornHit.properties.code)||0; const red=tornHit.properties.sig||tp>=0.10;
-      anom.push([red?'danger':'alert','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
-        tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',openBtn(SPCU,'SPC')]); }
-    if(catHit) anom.push([catHit.properties.rank>=4?'danger':'alert','⛈','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
-      'tornado / hail / wind risk',openBtn(SPCU,'SPC')]);
+      cards.push([red?'danger':'alert','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
+        tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',openBtn(SPCU,'SPC'),true]); }
+    if(catHit) cards.push([catHit.properties.rank>=4?'danger':'alert','⛈','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
+      'tornado / hail / wind risk',openBtn(SPCU,'SPC'),true]);
   }
+  // space weather (global scalars): geomagnetic storm + solar flare
+  if(KP!=null&&KP>=5) cards.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' · K-index',
+    'HF / GPS / grid impact',openBtn(SWPC,'SWPC'),true]);
+  if(XRAY&&/^[MX]/.test(XRAY)) cards.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
+    'HF radio blackout risk',openBtn(SWPC,'SWPC'),true]);
 
-  // space weather (global, not view-scoped): geomagnetic storm + solar flare
-  if(KP!=null&&KP>=5) anom.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' · K-index',
-    'HF / GPS / grid impact',openBtn(SWPC,'SWPC')]);
-  if(XRAY&&/^[MX]/.test(XRAY)) anom.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
-    'HF radio blackout risk',openBtn(SWPC,'SWPC')]);
-  // title severity: 0 none · 1 alert (amber) · 2 warning (red)
+  // traffic categories (aircraft, military) — listed last; don't alarm the title
+  CATS.filter(c=>!c.hazard).forEach(catCard);
+
+  // title severity from HAZARD cards only: 0 none · 1 alert (amber) · 2 warn (red)
   let titleSev=0;
-  anom.forEach(a=>{ titleSev=Math.max(titleSev,a[0]==='danger'?2:1); row(a[0],a[1],a[2],a[3],a[4],a[5]); });
-
+  cards.forEach(cd=>{ if(cd[6]) titleSev=Math.max(titleSev,cd[0]==='danger'?2:cd[0]==='alert'?1:0); });
   if(myGen!==sitrepGen) return; // a newer tick superseded this one — don't clobber
-  const t=$('#sit-title');
-  t.classList.remove('warn','alert');
+  const t=$('#sit-title'); t.classList.remove('warn','alert');
   if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
-
-  // -- everything else scoped to the map area (nearest-in-view) --
-  // Aircraft/military: the action opens a LIST of everything in view (a count
-  // is more useful as a roster than a jump to one plane).
-  const listBtn=(src,title)=>`<button class="act" data-act="list" data-src="${src}" data-title="${title}">LIST</button>`;
-  const acN=countView('src-nearair',b);
-  if(acN){ const nn=nearView('src-nearair',b,lat,lon);
-    row('','✈',acN+' AIRCRAFT IN VIEW',
-      nn?('nearest '+cut(nn.f.properties.flight||'?',8)):'live ADS-B traffic',
-      nn?(dist(nn.f)+' · '+nn.f.properties.alt+U(' ft')):'',
-      listBtn('src-nearair','AIRCRAFT IN VIEW')); }
-  const milN=countView('src-mil',b);
-  if(milN){ const nm=nearView('src-mil',b,lat,lon);
-    row('alert','🎖',milN+' MILITARY IN VIEW',
-      nm?('nearest '+cut(nm.f.properties.flight||'?',8)+(nm.f.properties.type&&nm.f.properties.type!=='?'?' · '+cut(nm.f.properties.type,5):'')):'military ADS-B',
-      nm?(dist(nm.f)+' · '+nm.f.properties.alt+U(' ft')):'',listBtn('src-mil','MILITARY IN VIEW')); }
-  const nq=nearView('src-emsc',b,lat,lon);
-  if(nq) row('','🌍','M'+nq.f.properties.mag+' EARTHQUAKE',cut(nq.f.properties.place,24),
-    dist(nq.f)+' · '+fmtTime(nq.f.properties.time),flyBtn(nq.f));
-  // Natural events (wildfires etc.): OPEN the event's source page (like SPC).
-  const ne=nearView('src-eonet',b,lat,lon);
-  if(ne) row('','🔥',cut((ne.f.properties.cat||'EVENT').toUpperCase(),20),cut(ne.f.properties.title,24),
-    dist(ne.f)+' · NASA EONET',
-    openBtn(ne.f.properties.link||('https://www.google.com/search?q='+encodeURIComponent(String(ne.f.properties.title||'natural event'))),'OPEN'));
-  const nd=nearView('src-gdacs',b,lat,lon);
-  if(nd&&!gRed.includes(nd.f)) row('','🌀',cut((nd.f.properties.type||'DISASTER').toUpperCase(),18),cut(gName(nd.f.properties),24),
-    dist(nd.f)+' · '+(nd.f.properties.level||'')+(nd.f.properties.country?' · '+cut(nd.f.properties.country,10):''),flyBtn(nd.f));
+  cards.forEach(cd=>row(cd[0],cd[1],cd[2],cd[3],cd[4],cd[5]));
 
   // -- WORLD NEWS: conflict/disaster/politics/etc. (not map-scoped) — Wikipedia.
   //    One blurb clamped to 3 lines; every item opens its source. --
@@ -1813,22 +1788,6 @@ function closeModal(){ $('#modal').hidden=true; }
 $('#modal-x').addEventListener('click',closeModal);
 $('#modal').addEventListener('click',e=>{ if(e.target.id==='modal') closeModal(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
-// roster of point features in the current view, nearest-first, with a per-item VIEW
-function aircraftListHTML(srcId){
-  const bb=viewBounds(), c=gl.getCenter();
-  const rLat=USER.lat!=null?USER.lat:c.lat, rLon=USER.lon!=null?USER.lon:c.lng;
-  const feats=featsIn(srcId).filter(f=>f.geometry&&f.geometry.type==='Point'&&inBounds(bb,f.geometry.coordinates[0],f.geometry.coordinates[1]))
-    .map(f=>({f,km:havKm(rLat,rLon,f.geometry.coordinates[1],f.geometry.coordinates[0])}))
-    .sort((x,y)=>x.km-y.km);
-  if(!feats.length) return '<div class="sit-empty">NO AIRCRAFT IN THIS AREA</div>';
-  // minimal 3-line entry: callsign · model · direction+distance + altitude (no icon, no buttons)
-  return feats.map(({f,km})=>{ const p=f.properties;
-    const model=escapeHtml(p.desc||p.type||'aircraft');
-    const dir=compass(bearing(rLat,rLon,f.geometry.coordinates[1],f.geometry.coordinates[0]));
-    const da=dir+' '+fmtMi(km)+' · '+(p.alt!=null&&p.alt!=='?'?p.alt+U(' ft'):'—');
-    return `<div class="mrow${p.mil?' mil':''}"><b>${escapeHtml(p.flight||p.hex||'?')}</b><span>${model}</span><span>${da}</span></div>`;
-  }).join('');
-}
 // shared action handler for SITREP rows AND modal rows
 function handleAct(btn){
   const act=btn.dataset.act;
@@ -1838,7 +1797,7 @@ function handleAct(btn){
     closeModal();
     if(window.matchMedia('(max-width:900px)').matches) openSheet('');
   } else if(act==='open'&&btn.dataset.url){ window.open(btn.dataset.url,'_blank','noopener'); }
-  else if(act==='list'){ openModal(btn.dataset.title||'LIST',aircraftListHTML(btn.dataset.src)); }
+  else if(act==='list'){ openModal(btn.dataset.title||'LIST',catListHTML(btn.dataset.src)); }
 }
 $('#sit-body').addEventListener('click',e=>{ const b=e.target.closest('[data-act]'); if(b) handleAct(b); });
 $('#modal-list').addEventListener('click',e=>{ const b=e.target.closest('[data-act]'); if(b) handleAct(b); });
