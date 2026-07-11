@@ -93,7 +93,7 @@
     flex:1 1 auto;min-height:0}
   #sitrep{top:0;right:0;left:auto;width:320px;bottom:0;
     padding-right:var(--sa-r);border-left:1px solid var(--line)}
-  #obj-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:11px 12px;
+  #obj-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 12px;min-height:48px;
     border-bottom:1px solid var(--line);font-size:13px;letter-spacing:2px;color:var(--accent);
     font-weight:700}
   #obj-head .brand{color:var(--ink-dim);letter-spacing:.5px;font-weight:400;margin-left:auto;font-size:13px}
@@ -162,8 +162,8 @@
   /* ---------- SITREP briefing panel (right side, matches OBJECTS) ---------- */
   #sit-title.warn{color:var(--danger)!important}
   #sit-title.alert{color:var(--warn)!important}
-  #sit-head{display:flex;align-items:center;gap:8px;padding:11px 12px;
-    border-bottom:1px solid var(--line);flex:0 0 auto;min-height:44px}
+  #sit-head{display:flex;align-items:center;gap:8px;padding:9px 12px;
+    border-bottom:1px solid var(--line);flex:0 0 auto;min-height:48px}
   #sit-head .title{color:var(--accent);font-size:13px;letter-spacing:2px;font-weight:700;
     flex:0 0 auto}
   #utc-badge{flex:0 0 auto}
@@ -259,7 +259,7 @@
 <!-- objects panel -->
 <div id="layers" class="panel">
   <div class="sheet-grip" data-close="layers"></div>
-  <div id="obj-head">◧ OBJECTS <span class="badge" id="utc-badge" title="Coordinated Universal Time" style="margin-left:auto"><b id="utc">--:--</b>&nbsp;UTC</span></div>
+  <div id="obj-head">◧ MAP DATA <span class="badge" id="utc-badge" title="Coordinated Universal Time" style="margin-left:auto"><b id="utc">--:--</b>&nbsp;UTC</span></div>
   <div id="layers-scroll">
     <div class="sec-h">Aircraft</div><div id="grp-air"></div>
     <div class="sec-h">Maritime &amp; rail</div><div id="grp-surface"></div>
@@ -299,7 +299,7 @@
 <div id="mnav">
   <button data-p="" class="active"><span class="ic">🗺</span>MAP</button>
   <button data-p="sitrep"><span class="ic">◈</span>SITREP</button>
-  <button data-p="layers"><span class="ic">◧</span>OBJECTS</button>
+  <button data-p="layers"><span class="ic">◧</span>MAP DATA</button>
 </div>
 
 <div id="toast"></div>
@@ -538,6 +538,15 @@ function shapeURL(color,pts){
   x.beginPath();pts.forEach((p,i)=>{const X=p[0]*u,Y=p[1]*u;i?x.lineTo(X,Y):x.moveTo(X,Y);});
   x.closePath();x.fill();x.stroke();return c.toDataURL();
 }
+// shared emoji table — used for BOTH the map markers and the panel rows so the
+// selector panel always matches the map (previously the panel had its own
+// shorter list, so e.g. flood gauges showed a plain dot).
+const ICON_EMOJI={'ico-fire':'🔥','ico-volcano':'🌋','ico-cyclone':'🌀','ico-flood':'🌊',
+  'ico-quake':'🟠','ico-drought':'🏜️','ico-ice':'🧊','ico-storm':'⛈️','ico-dust':'🌫️',
+  'ico-launch':'🚀','ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬','ico-iss':'🛰️',
+  'ico-train':'🚆','ico-disaster':'⚠️','ico-news':'📰',
+  'ico-conflict':'💥','ico-malware':'🦠','ico-outage':'📴',
+  'ico-water':'💧','ico-pin':'📍'};
 // OBJECTS-panel icon HTML that mirrors the on-map marker for each layer
 function panelIconHTML(cfg){
   const ic=cfg.icon||'';
@@ -546,9 +555,8 @@ function panelIconHTML(cfg){
   if(ic==='veh-train') return `<img class="pic" src="${shapeURL(cfg.color,TRAIN)}">`;
   if(ic==='ico-cam'&&CAM_URL) return `<img class="pic" src="${CAM_URL}">`;
   if(ic==='ico-sat'&&SAT_URL) return `<img class="pic" src="${SAT_URL}">`;
-  const em={'ico-fire':'🔥','ico-disaster':'⚠️','ico-iss':'🛰️','ico-volcano':'🌋',
-    'ico-launch':'🚀','ico-antenna':'📡','ico-news':'📰','ico-conflict':'💥',
-    'ico-malware':'🦠','ico-outage':'📴'}[ic];
+  if(ic==='ico-gauge'&&GAUGE_URL) return `<img class="pic" src="${GAUGE_URL}">`;
+  const em=ICON_EMOJI[ic];
   if(em) return `<span class="pic emj">${em}</span>`;
   return `<span class="sw" style="color:${cfg.color};background:${cfg.color}"></span>`;
 }
@@ -589,23 +597,32 @@ function satIcon(){ return makeGlyph((x,s)=>{ const u=s/32; x.translate(s/2,s/2)
   // dish
   x.fillStyle='#38d0ff';x.beginPath();x.arc(0,0,2.6*u,0,7);x.fill();
 }); }
-let CAM_URL='',SAT_URL='';
+// river/flood GAUGE — a measuring staff standing in water (distinct from the
+// plain water-drop used elsewhere)
+function gaugeIcon(){ return makeGlyph((x,s)=>{ const u=s/32; x.translate(s/2,s/2);
+  x.strokeStyle='rgba(3,8,14,.85)';x.lineWidth=u*1.1;x.lineJoin='round';
+  // water surface + body
+  x.fillStyle='#38d0ff';x.beginPath();x.moveTo(-13*u,3*u);
+  x.bezierCurveTo(-8*u,0,-5*u,6*u,0,3*u);x.bezierCurveTo(5*u,0,8*u,6*u,13*u,3*u);
+  x.lineTo(13*u,13*u);x.lineTo(-13*u,13*u);x.closePath();x.fill();
+  // measuring staff
+  x.fillStyle='#eef4ff';x.beginPath();x.rect(-2.2*u,-13*u,4.4*u,20*u);x.fill();x.stroke();
+  // tick marks
+  x.strokeStyle='#0b1420';x.lineWidth=u*1.2;
+  [-9,-5,-1].forEach(i=>{x.beginPath();x.moveTo(-2.2*u,i*u);x.lineTo(2.2*u,i*u);x.stroke();});
+}); }
+let CAM_URL='',SAT_URL='',GAUGE_URL='';
 function registerIcons(){
   addImg('ac-near',  shapeIcon('#2fe07a',PLANE));   // aircraft = green
   addImg('ac-mil',   shapeIcon(YEL,PLANE));         // military = yellow
   addImg('ac-sos',   shapeIcon('#ff4455',PLANE,44));// emergency = red
   addImg('ship',     shapeIcon(YEL,SHIP));          // ships = yellow
   addImg('veh-train',shapeIcon(YEL,TRAIN));         // trains = yellow
-  const cam=camIcon(), sat=satIcon();
+  const cam=camIcon(), sat=satIcon(), gauge=gaugeIcon();
   addImg('ico-cam',cam.data); CAM_URL=cam.url;      // clearer camera glyph
   addImg('ico-sat',sat.data); SAT_URL=sat.url;      // satellite glyph
-  const E={'ico-fire':'🔥','ico-volcano':'🌋','ico-cyclone':'🌀','ico-flood':'🌊',
-    'ico-quake':'🟠','ico-drought':'🏜️','ico-ice':'🧊','ico-storm':'⛈️','ico-dust':'🌫️',
-    'ico-launch':'🚀','ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬','ico-iss':'🛰️',
-    'ico-train':'🚆','ico-disaster':'⚠️','ico-news':'📰',
-    'ico-conflict':'💥','ico-malware':'🦠','ico-outage':'📴',
-    'ico-water':'💧','ico-pin':'📍'};
-  for(const k in E) addImg(k,emojiIcon(E[k]));
+  addImg('ico-gauge',gauge.data); GAUGE_URL=gauge.url; // river/flood gauge glyph
+  for(const k in ICON_EMOJI) addImg(k,emojiIcon(ICON_EMOJI[k]));
 }
 // EONET category -> icon; GDACS type -> icon
 const EONET_ICON={wildfires:'ico-fire',volcanoes:'ico-volcano',severeStorms:'ico-storm',
@@ -874,7 +891,7 @@ defLayer({
       // colour = recency (fresh → hot), but any major quake stays vivid red
       let col= age<1?'#ff2d55': age<6?'#ff6a3d': age<24?'#ffb454': age<72?'#e0c34b':'#7f8c9b';
       if(mag>=6) col='#ff2d55'; else if(mag>=5&&age<72) col='#ff6a3d';
-      f.properties={_kind:'emsc',_r:2.6+mag*2.6,_col:col,mag:p.mag,age:age,
+      f.properties={_kind:'emsc',_r:1.6+mag*1.4,_col:col,mag:p.mag,age:age,
         place:p.flynn_region||p.region||'',time:p.time,depth:p.depth}; });
     return j;
   },
@@ -886,7 +903,7 @@ defLayer({
 });
 
 defLayer({
-  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:600, defaultOff:true, icon:'ico-water', iconSize:0.42,
+  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:600, defaultOff:true, icon:'ico-gauge', iconSize:0.5,
   // USGS live stream gauges in the current view (gauge height, ft)
   loader: async ()=>{
     const b=gl.getBounds();
@@ -944,10 +961,10 @@ defLayer({
     const feats=[];
     (j.coordinates||[]).forEach(c=>{
       const [lon,lat,val]=c;
-      if(val<40) return;
+      if(val<10) return;   // show the auroral oval even in quiet conditions (was 40 → usually empty)
       const lon180 = lon>180 ? lon-360 : lon;
       feats.push({type:'Feature',geometry:{type:'Point',coordinates:[lon180,lat]},
-        properties:{_kind:'aurora',_col:val>=80?'#b6ff7a':val>=60?'#4be08a':'#2ba86b',p:val}});
+        properties:{_kind:'aurora',_col:val>=60?'#b6ff7a':val>=30?'#4be08a':'#2ba86b',p:val}});
     });
     return {type:'FeatureCollection',features:feats};
   },
