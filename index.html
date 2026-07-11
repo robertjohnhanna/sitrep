@@ -26,9 +26,10 @@
 
      CORS notes (verified in browser context, not just curl):
        ACAO:* confirmed — fetch works cross-origin:
-         USGS, CelesTrak, Amtrak(amtraker), NASA EONET,
-         wheretheiss.at, DeepStateMap, Wikipedia, RestCountries,
-         Wikidata, Nominatim, adsb.lol, radio-browser
+         USGS, CelesTrak, Amtrak(amtraker), NASA EONET, NOAA SWPC
+         (Kp / GOES X-ray / OVATION aurora), wheretheiss.at,
+         DeepStateMap, Wikipedia, RestCountries, Wikidata,
+         Nominatim, adsb.lol, radio-browser
        DROPPED — require a key, violating the keyless rule:
          OpenAQ v3 (401), NASA FIRMS (MAP_KEY), APRS.fi,
          OpenSky, aisstream, Shodan, GFW, Sentinel Hub.
@@ -212,10 +213,15 @@
       align-items:center;justify-content:center;gap:3px;min-height:44px}
     #mnav button .ic{font-size:18px;line-height:1}
     #mnav button.active{color:var(--accent)}
-    .panel{left:0!important;right:0!important;top:auto!important;width:auto!important;
-      bottom:calc(54px + var(--sa-b));max-height:64vh!important;
-      border-radius:16px 16px 0 0;border-bottom:none;
-      transform:translateY(110%);transition:transform .28s cubic-bezier(.32,.72,.35,1);
+    /* Selected panel fills the whole screen (top safe-area down to the nav
+       bar) and scrolls internally — an opaque full-height pull-up, so nothing
+       bleeds behind the browser chrome and long lists scroll properly. */
+    .panel{left:0!important;right:0!important;top:0!important;width:auto!important;
+      bottom:calc(54px + var(--sa-b))!important;max-height:none!important;z-index:20;
+      padding-top:var(--sa-t);background:var(--bg);
+      backdrop-filter:none;-webkit-backdrop-filter:none;
+      border-radius:0;border:none;
+      transform:translateY(100%);transition:transform .28s cubic-bezier(.32,.72,.35,1);
       box-shadow:0 -12px 40px #000a}
     .panel.open{transform:translateY(0)}
     .sheet-grip{display:block;flex:0 0 auto;padding:8px 0 2px;cursor:grab}
@@ -885,6 +891,27 @@ defLayer({
     <div class="kv"><span>src</span>NOAA / NWS</div>`
 });
 
+defLayer({
+  // SPACE WEATHER (map layer): live auroral oval — NOAA SWPC OVATION model,
+  // 1° grid, cells kept where visible-aurora probability ≥ 40%. Keyless, CORS *.
+  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'hazard', refresh:300, colored:true,
+  loader: async ()=>{
+    const j=await getJSON('https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',{timeout:25000});
+    const feats=[];
+    (j.coordinates||[]).forEach(c=>{
+      const [lon,lat,val]=c;
+      if(val<40) return;
+      const lon180 = lon>180 ? lon-360 : lon;
+      feats.push({type:'Feature',geometry:{type:'Point',coordinates:[lon180,lat]},
+        properties:{_kind:'aurora',_col:val>=80?'#b6ff7a':val>=60?'#4be08a':'#2ba86b',p:val}});
+    });
+    return {type:'FeatureCollection',features:feats};
+  },
+  popup:p=>`<h4>🌌 Aurora</h4>
+    <div class="kv"><span>probability</span>${p.p}%</div>
+    <div class="kv"><span>src</span>NOAA SWPC OVATION</div>`
+});
+
 /* =====================================================================
    3. LAYER RUNTIME — sources, styles, toggles, refresh loop
    ===================================================================== */
@@ -1093,10 +1120,32 @@ async function headOfState(countryName){
 }
 
 /* =====================================================================
-   6. UTC CLOCK
+   6. UTC CLOCK + SPACE WEATHER (global Kp index, GOES X-ray flare class)
+   NOAA SWPC — keyless, CORS *. Polled every 2 min; surfaced in the SITREP
+   as a conditions row and, when active, as geomagnetic-storm / solar-flare
+   anomalies (the auroral-oval map layer is the visual half).
    ===================================================================== */
 setInterval(()=>{ $('#utc').textContent=new Date().toISOString().slice(11,16); },1000);
 $('#utc').textContent=new Date().toISOString().slice(11,16);
+let KP=null, XRAY=null; // latest planetary Kp + GOES X-ray flare class
+async function loadKp(){
+  try{
+    const j=await getJSON('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
+    let kp=null;
+    for(let i=j.length-1;i>=0;i--){
+      const r=j[i]; const v=Array.isArray(r)?r[1]:r.Kp;
+      const n=parseFloat(v); if(isFinite(n)){kp=n;break;}
+    }
+    KP=kp;
+  }catch(e){ KP=null; }
+}
+async function loadXray(){
+  try{
+    const j=await getJSON('https://services.swpc.noaa.gov/json/goes/primary/xray-flares-latest.json');
+    const f=Array.isArray(j)?j[0]:j;
+    XRAY=(f&&(f.current_class||f.max_class))||null;
+  }catch(e){ XRAY=null; }
+}
 
 /* =====================================================================
    6b. LOCATION + SITREP — the "at a glance" intelligence layer
@@ -1210,6 +1259,9 @@ async function sitrepTick(){
     anom.push([ex?'danger':'alert','⚠','WEATHER WARNING',nws.length+' NWS warning'+(nws.length>1?'s':'')+' in view · '+escapeHtml(String(top.properties.event)),polyFlyBtn(top)]); }
   const bigQ=featsIn('src-emsc').filter(f=>inBounds(b,f.geometry.coordinates[0],f.geometry.coordinates[1])&&(+f.properties.mag)>=5).sort((x,y)=>y.properties.mag-x.properties.mag)[0];
   if(bigQ) anom.push(['danger','🌍','MAJOR EARTHQUAKE','M'+bigQ.properties.mag+' · '+escapeHtml(String(bigQ.properties.place||'').slice(0,42)),flyBtn(bigQ)]);
+  // space weather (global, not view-scoped): geomagnetic storm + solar flare
+  if(KP!=null&&KP>=5) anom.push(['alert','🧲','GEOMAGNETIC STORM','Kp '+KP+' — HF / GPS / grid impact possible','']);
+  if(XRAY&&/^[MX]/.test(XRAY)) anom.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'HF radio blackout risk','']);
   // title severity: 0 none · 1 alert (amber) · 2 warning (red)
   let titleSev=0;
   anom.forEach(a=>{ titleSev=Math.max(titleSev,a[0]==='danger'?2:1); row(a[0],a[1],a[2],a[3],a[4]); });
@@ -1218,6 +1270,10 @@ async function sitrepTick(){
   const t=$('#sit-title');
   t.classList.remove('warn','alert');
   if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
+
+  // -- global space weather conditions (always shown) --
+  row(KP!=null&&KP>=5?'alert':'','🛰','SPACE WEATHER',
+    'Kp '+(KP!=null?KP:'–')+' · SOLAR '+(XRAY||'–'));
 
   // -- everything else scoped to the map area (nearest-in-view) --
   const acN=countView('src-nearair',b);
@@ -1482,6 +1538,8 @@ gl.on('load',()=>{
     if(cfg.refresh>0) setInterval(()=>runLayer(cfg),cfg.refresh*1000);
   });
   loadEmgPool(); // warm the emergency-broadcast pool so the first fix tunes fast
+  loadKp();   setInterval(loadKp,120000);   // space weather: planetary Kp
+  loadXray(); setInterval(loadXray,120000); // space weather: GOES X-ray flare
   setMapPadding();
   locate();
   sitrepTick(); // SITREP works off the map area, even before a location fix
