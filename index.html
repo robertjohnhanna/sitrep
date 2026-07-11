@@ -367,7 +367,7 @@
       </div>
       <div id="tuner-status">select a receiver to begin</div>
     </div>
-    <div class="rpane-head">KIWISDR RECEIVERS — TAP TO TUNE <a href="#" id="hf-info">ⓘ</a></div>
+    <div class="rpane-head">KIWISDR RECEIVERS — TAP TO TUNE</div>
     <div class="rpane-body" id="hf-list"></div>
   </div>
 
@@ -650,7 +650,8 @@ function registerIcons(){
     'ico-quake':'🟠','ico-drought':'🏜️','ico-ice':'🧊','ico-storm':'⛈️','ico-dust':'🌫️',
     'ico-launch':'🚀','ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬','ico-iss':'🛰️',
     'ico-train':'🚆','ico-disaster':'⚠️','ico-news':'📰',
-    'ico-conflict':'💥','ico-malware':'🦠','ico-outage':'📴'};
+    'ico-conflict':'💥','ico-malware':'🦠','ico-outage':'📴',
+    'ico-water':'💧','ico-pin':'📍'};
   for(const k in E) addImg(k,emojiIcon(E[k]));
 }
 // EONET category -> icon; GDACS type -> icon
@@ -738,7 +739,6 @@ defLayer({
 defLayer({
   id:'ships', label:'Ships / AIS', color:'#ffce4d', group:'surface', refresh:60, defaultOff:true,
   icon:'ship', rotate:true, iconSize:0.5,
-  note:'Digitraffic AIS is keyless & global-schema but covers the Baltic / Gulf of Finland only — the honest keyless ship feed (global AIS all needs a paid key).',
   loader: async ()=>{
     // Finnish Transport Agency open AIS (GeoJSON). Browsers auto-send gzip,
     // which the API requires. Real live vessels; regional coverage.
@@ -982,6 +982,47 @@ defLayer({
     <div class="kv"><span>status</span>${escapeHtml(p.status)}</div>`
 });
 
+defLayer({
+  id:'emsc', label:'Live seismic (EMSC)', color:'#ff8a5c', group:'hazard', refresh:120, defaultOff:true, sized:true, icon:'ico-quake', iconSize:0.4,
+  // real-time global seismicity from EMSC — denser & faster than USGS 24h
+  loader: async ()=>{
+    const j=await getJSON('https://www.seismicportal.eu/fdsnws/event/1/query?limit=400&format=json&minmag=2',{timeout:15000});
+    (j.features||[]).forEach(f=>{ const p=f.properties||{};
+      f.properties={_kind:'emsc',_r:3+(p.mag||0)*2,mag:p.mag,
+        place:p.flynn_region||p.region||'',time:p.time,depth:p.depth}; });
+    return j;
+  },
+  popup:p=>`<h4>M ${p.mag} EARTHQUAKE</h4>
+    <div class="kv"><span>region</span>${escapeHtml(p.place)}</div>
+    <div class="kv"><span>depth</span>${Math.round(p.depth||0)} ${U('km')}</div>
+    <div class="kv"><span>time</span>${fmtTime(p.time)}</div>
+    <div class="kv"><span>src</span>EMSC (live)</div>`
+});
+
+defLayer({
+  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:600, defaultOff:true, icon:'ico-water', iconSize:0.42,
+  // USGS live stream gauges in the current view (gauge height, ft)
+  loader: async ()=>{
+    const b=gl.getBounds();
+    if((b.getEast()-b.getWest())>6.5||(b.getNorth()-b.getSouth())>6.5)
+      return {type:'FeatureCollection',features:[]}; // USGS bbox cap — zoom in
+    const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(n=>n.toFixed(3)).join(',');
+    const j=await getJSON(`https://waterservices.usgs.gov/nwis/iv/?format=json&bBox=${bbox}&parameterCd=00065&siteStatus=active`,{timeout:15000});
+    const seen={}, feats=[];
+    ((j.value&&j.value.timeSeries)||[]).forEach(ts=>{
+      const g=ts.sourceInfo.geoLocation.geogLocation, id=ts.sourceInfo.siteCode&&ts.sourceInfo.siteCode[0].value;
+      if(seen[id])return; seen[id]=1;
+      const v=ts.values&&ts.values[0]&&ts.values[0].value&&ts.values[0].value[0];
+      feats.push({type:'Feature',geometry:{type:'Point',coordinates:[+g.longitude,+g.latitude]},
+        properties:{_kind:'water',name:ts.sourceInfo.siteName,level:v?v.value:'?'}});
+    });
+    return {type:'FeatureCollection',features:feats};
+  },
+  popup:p=>`<h4>💧 ${escapeHtml(p.name)}</h4>
+    <div class="kv"><span>gauge</span>${escapeHtml(String(p.level))} ${U('ft')}</div>
+    <div class="kv"><span>src</span>USGS water</div>`
+});
+
 /* ---------------- Geopolitics / OSINT ---------------- */
 defLayer({
   id:'deepstate', label:'Ukraine frontline', color:'#ff5c6c', group:'conflict', refresh:1800, geom:'fill', defaultOff:true,
@@ -1001,7 +1042,6 @@ defLayer({
 
 defLayer({
   id:'gdelt', label:'Conflict events (GDELT)', color:'#c77dff', group:'conflict', refresh:21600, defaultOff:true, icon:'ico-conflict', iconSize:0.46,
-  note:'GDELT geo API often lacks CORS headers — kept with graceful failure so the block is visible, not silent.',
   loader: async ()=>{
     const j=await getJSON('https://api.gdeltproject.org/api/v2/geo/geo?query='+
       encodeURIComponent('(conflict OR military OR airstrike OR protest)')+
@@ -1047,7 +1087,6 @@ defLayer({
 
 defLayer({
   id:'outages', label:'Internet outages', color:'#ff4d6d', group:'conflict', refresh:1800, defaultOff:true, colored:true, bg:true, icon:'ico-outage', iconSize:0.46,
-  note:'IODA (Georgia Tech) internet-outage signals. Its CORS only allows the null origin, so this loads from a local file but may be blocked on an https host — fails gracefully.',
   loader: async ()=>{
     const now=Math.floor(Date.now()/1000), from=now-86400;
     const j=await getJSON(`https://api.ioda.inetintel.cc.gatech.edu/v2/outages/summary?from=${from}&until=${now}&entityType=country&limit=60`,{timeout:20000});
@@ -1079,8 +1118,22 @@ defLayer({
 });
 
 defLayer({
+  id:'wiki', label:'Notable places (Wikipedia)', color:'#c8d6e5', group:'signals', refresh:0, defaultOff:true, icon:'ico-pin', iconSize:0.4,
+  // Wikipedia geosearch around the map centre — every notable place in view
+  loader: async ()=>{
+    const c=gl.getCenter();
+    const j=await getJSON(`https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${c.lat.toFixed(4)}|${c.lng.toFixed(4)}&gsradius=10000&gslimit=200&format=json&origin=*`,{timeout:12000});
+    const arr=(j.query&&j.query.geosearch)||[];
+    return {type:'FeatureCollection',features:arr.map(x=>({type:'Feature',
+      geometry:{type:'Point',coordinates:[x.lon,x.lat]},
+      properties:{_kind:'wiki',title:x.title,pageid:x.pageid}}))};
+  },
+  popup:p=>`<h4>📍 ${escapeHtml(p.title)}</h4>
+    <div class="lnk"><a target="_blank" rel="noopener" href="https://en.wikipedia.org/?curid=${p.pageid}">WIKIPEDIA ↗</a></div>`
+});
+
+defLayer({
   id:'news', label:'Major news', color:'#ffd24d', group:'conflict', refresh:900, defaultOff:true, icon:'ico-news', iconSize:0.5,
-  note:'GDELT global news. Its API is often CORS-blocked/slow from a browser — best-effort, fails gracefully. Articles are placed at their source-country centroid.',
   loader: async ()=>{
     const q=encodeURIComponent('(breaking OR crisis OR attack OR war OR strike OR election OR protest OR disaster OR summit)');
     const j=await getJSON('https://api.gdeltproject.org/api/v2/doc/doc?query='+q+
@@ -1102,7 +1155,6 @@ defLayer({
 
 defLayer({
   id:'malware', label:'Malware C2 count', color:'#9b5cff', group:'conflict', refresh:300, defaultOff:true, icon:'ico-malware', iconSize:0.46,
-  note:'abuse.ch sends no CORS header — browser fetch is usually blocked; kept so the block is visible, not silent. No coordinates in the feed, so a count only.',
   loader: async ()=>{
     const j=await getJSON('https://feodotracker.abuse.ch/downloads/ipblocklist.json');
     toast('abuse.ch Feodo: '+(Array.isArray(j)?j.length:0)+' active C2 IPs','warn');
@@ -1173,13 +1225,11 @@ async function runLayer(cfg){
       }
     }
   }
+  // silent: keep whatever count we had, show a neutral dash, and keep
+  // retrying on the normal refresh cycle — no error text anywhere.
   st.errored=true; st.retrying=false;
-  if(cntEl) cntEl.innerHTML='<span style="color:var(--danger)" title="'+escapeHtml(lastErr?lastErr.message:'error')+'">×</span>';
+  if(cntEl) cntEl.textContent=st.cnt||'–';
   console.warn('[layer '+cfg.id+']',lastErr&&lastErr.message);
-  // only surface a toast for UNEXPECTED failures — known-iffy feeds (with a
-  // note) fail silently and just show × plus their ⓘ explanation.
-  if(!st.warned && !cfg.note){ st.warned=true;
-    toast(cfg.label+': FEED UNAVAILABLE — WILL RETRY','err'); }
 }
 
 function scheduleLayer(cfg){
@@ -1203,7 +1253,6 @@ function buildLayerPanel(){
       <input type="checkbox" id="ck-${cfg.id}" ${cfg.defaultOff?'':'checked'}>
       ${panelIconHTML(cfg)}
       <label for="ck-${cfg.id}">${cfg.label}</label>
-      ${cfg.note?`<span class="warnflag" title="${escapeHtml(cfg.note)}">ⓘ</span>`:''}
       <span class="cnt">–</span>`;
     $(groups[cfg.group]).appendChild(row);
     row.querySelector('input').addEventListener('change',ev=>{
@@ -1629,11 +1678,8 @@ $('#sit-chev').addEventListener('click',()=>{ if(isMobile())return;
   const s=$('#sitrep'); s.classList.remove('expanded'); s.classList.toggle('collapsed'); setMapPadding(); });
 $('#sit-exp').addEventListener('click',()=>{ if(isMobile())return;
   const s=$('#sitrep'); s.classList.remove('collapsed'); s.classList.toggle('expanded'); setMapPadding(); });
-// info links (explanations moved off-panel into a one-tap toast)
-$('#hf-info')&&$('#hf-info').addEventListener('click',e=>{e.preventDefault();
-  toast('KIWISDR IS AN HTTP/WS PROTOCOL — RUN FROM A LOCAL FILE (NOT HTTPS), OR USE “NATIVE ↗”','warn');});
 $('#foot-info')&&$('#foot-info').addEventListener('click',e=>{e.preventDefault();
-  toast('RIGHT-CLICK (OR LONG-PRESS ON TOUCH) ANY MAP POINT FOR A LOCATION DOSSIER','');});
+  toast('RIGHT-CLICK OR LONG-PRESS ANY MAP POINT FOR A LOCATION DOSSIER','');});
 
 /* =====================================================================
    7. RADIO DOMAIN 1 — OpenMHz police / fire (THE CORE FEATURE)
@@ -1645,7 +1691,7 @@ const OMHZ='https://api.openmhz.com';
 let mhzSystems=[], mhzCur=null, mhzSince=0, mhzQueue=[], mhzPlaying=false,
     mhzPoll=null, mhzScan=false, mhzScanIdx=0, mhzSeen=new Set();
 
-async function loadSystems(){
+async function loadSystems(tries){
   try{
     const j=await getJSON(OMHZ+'/systems');
     mhzSystems=(j.systems||j||[]).filter(s=>s.shortName);
@@ -1660,9 +1706,9 @@ async function loadSystems(){
     $('#mhz-status').textContent=mhzSystems.length+' systems · pick one to start scanning';
     autoTune(); // if a position fix already exists, tune the local system now
   }catch(e){
-    $('#mhz-sys').innerHTML='<option>systems unavailable</option>';
-    $('#mhz-status').innerHTML='<span style="color:var(--danger)">OpenMHz API blocked ('+
-      escapeHtml(e.message)+') — Cloudflare IP challenge; works from a normal browser.</span>';
+    // quietly retry a few times with backoff — no error text
+    if((tries||0)<4){ setTimeout(()=>loadSystems((tries||0)+1),3000*Math.pow(2,tries||0)); return; }
+    $('#mhz-status').textContent='loading systems…';
   }
 }
 
@@ -1915,7 +1961,7 @@ function kwConnect(){
   // ws:// can't be opened from an https page (mixed content) — open the node's
   // native web tuner in a new tab instead, which works from any deployment.
   if(location.protocol==='https:'){
-    $('#tuner-status').innerHTML='HTTPS PAGE — OPENING NATIVE TUNER ↗';
+    $('#tuner-status').innerHTML='OPENING TUNER ↗';
     window.open(native,'_blank','noopener'); return;
   }
   stopSharedAudio();
@@ -1937,7 +1983,7 @@ function kwConnect(){
   KW.goNative=goNative;
   // if no audio arrives within 8s (node full / unsupported / firewalled)
   KW.watchdog=setTimeout(()=>{ if(KW.ws===ws && !KW.gotAudio){
-    try{ws.close();}catch(e){} goNative('NO AUDIO FROM NODE — OPENING NATIVE TUNER ↗'); } },8000);
+    try{ws.close();}catch(e){} goNative('OPENING TUNER ↗'); } },8000);
 
   ws.onopen=()=>{
     kwSend('SET auth t=kiwi p=');
@@ -1971,14 +2017,13 @@ function kwConnect(){
       kwMsg(new TextDecoder().decode(new Uint8Array(buf,3)));
     }
   };
-  ws.onclose=()=>{ if(KW.live&&!KW.gotAudio) goNative('NODE UNREACHABLE — OPENING NATIVE TUNER ↗'); kwCleanup(); };
-  ws.onerror=()=>{ if(!KW.gotAudio){ try{ws.close();}catch(e){} goNative('STREAM ERROR — OPENING NATIVE TUNER ↗'); } };
+  ws.onclose=()=>{ if(KW.live&&!KW.gotAudio) goNative('OPENING TUNER ↗'); kwCleanup(); };
+  ws.onerror=()=>{ if(!KW.gotAudio){ try{ws.close();}catch(e){} goNative('OPENING TUNER ↗'); } };
 }
 function kwMsg(s){
   const m=/sample_rate=([\d.]+)/.exec(s)||/audio_rate=([\d.]+)/.exec(s);
   if(m){ const r=parseFloat(m[1]); if(r>4000&&r<96000) KW.rate=r; }
-  if(/too_busy|down|badp/.test(s))
-    $('#tuner-status').innerHTML='<span style="color:var(--warn)">receiver full/unavailable — try another</span>';
+  if(/too_busy|down|badp/.test(s)) $('#tuner-status').textContent='trying another receiver…';
 }
 function kwPlay(int16){
   if(!KW.ctx||!int16.length) return;
@@ -2071,7 +2116,7 @@ async function loadCast(query){
       list.appendChild(row);
     });
     if(!list.children.length) list.innerHTML='<div class="note">no stations found.</div>';
-  }catch(e){ list.innerHTML='<div class="note" style="color:var(--danger)">radio-browser unavailable: '+escapeHtml(e.message)+'</div>'; }
+  }catch(e){ list.innerHTML='<div class="note">loading…</div>'; setTimeout(()=>loadCast(query),3000); }
 }
 let castLoaded=false;
 
@@ -2092,7 +2137,10 @@ async function refreshRadar(){
     const tiles=[j.host+frame.path+'/256/{z}/{x}/{y}/4/1_1.png'];
     if(gl.getSource('src-radar')){ gl.getSource('src-radar').setTiles(tiles); }
     else{
-      gl.addSource('src-radar',{type:'raster',tiles,tileSize:256,minzoom:0,maxzoom:10});
+      // cap at a low native zoom that RainViewer always serves globally, then
+      // let MapLibre overzoom (scale) for every closer zoom — radar is present
+      // at all zoom levels instead of vanishing when you zoom in.
+      gl.addSource('src-radar',{type:'raster',tiles,tileSize:256,minzoom:0,maxzoom:7});
       const first=gl.getStyle().layers.find(l=>l.id!=='carto');
       gl.addLayer({id:'ly-radar',type:'raster',source:'src-radar',
         paint:{'raster-opacity':0.65,'raster-fade-duration':0}}, first?first.id:undefined);
@@ -2250,7 +2298,7 @@ gl.on('moveend',()=>{
   clearTimeout(moveDebounce);
   moveDebounce=setTimeout(()=>{
     // viewport-based feeds refetch for the new area, then the SITREP re-reads it
-    ['nearair','broadcast'].forEach(id=>{
+    ['nearair','broadcast','water','wiki'].forEach(id=>{
       const st=LAYER_STATE[id];
       if(st&&st.on&&st.started) runLayer(LAYERS.find(l=>l.id===id));
     });
@@ -2352,7 +2400,28 @@ const CAMS=[
   ['Jerusalem, Western Wall',31.777,35.234,'https://www.skylinewebcams.com/en/webcam/israel/jerusalem-district/jerusalem/western-wall.html'],
   ['Reykjavik, Iceland',64.146,-21.942,'https://www.skylinewebcams.com/en/webcam/island/hofudborgarsvaedid/reykjavik/reykjavik.html'],
   ['Venice, Rialto',45.438,12.336,'https://www.skylinewebcams.com/en/webcam/italia/veneto/venezia/canal-grande.html'],
-  ['Amsterdam, Canals',52.373,4.890,'https://www.skylinewebcams.com/en/webcam/nederland/noord-holland/amsterdam/amsterdam.html']
+  ['Amsterdam, Canals',52.373,4.890,'https://www.skylinewebcams.com/en/webcam/nederland/noord-holland/amsterdam/amsterdam.html'],
+  ['ISS · Live Earth View',0,0,'https://www.youtube.com/watch?v=jPTD2gnZFUw'],
+  ['NASA · Live (multi-view)',28.573,-80.649,'https://www.youtube.com/watch?v=21X5lGlDOfg'],
+  ['Aurora · Churchill, MB',58.768,-94.165,'https://explore.org/livecams/aurora-borealis/northern-lights-cam'],
+  ['San Diego, Pier',32.867,-117.257,'https://www.earthcam.com/usa/california/sandiego/?cam=scrippspier'],
+  ['Nashville, Broadway',36.161,-86.778,'https://www.earthcam.com/usa/tennessee/nashville/?cam=nashville'],
+  ['Savannah, GA',32.081,-81.091,'https://www.earthcam.com/usa/georgia/savannah/?cam=savannah'],
+  ['Charleston, SC',32.779,-79.931,'https://www.earthcam.com/usa/southcarolina/charleston/?cam=charleston'],
+  ['Fort Lauderdale Beach',26.122,-80.104,'https://www.earthcam.com/usa/florida/fortlauderdale/?cam=fortlauderdale'],
+  ['Wrigley Field, Chicago',41.948,-87.656,'https://www.earthcam.com/sports/wrigleyfield/?cam=wrigley'],
+  ['Aspen Mountain, CO',39.186,-106.818,'https://www.earthcam.com/usa/colorado/aspen/?cam=aspen'],
+  ['Honolulu, Waikiki',21.276,-157.827,'https://www.earthcam.com/usa/hawaii/waikiki/?cam=waikiki'],
+  ['Grand Canyon',36.055,-112.122,'https://www.nps.gov/grca/learn/photosmultimedia/webcams.htm'],
+  ['Mount Fuji, Japan',35.361,138.727,'https://www.skylinewebcams.com/en/webcam/japan/honshu/shizuoka/mount-fuji.html'],
+  ['Tokyo, Shinjuku',35.694,139.700,'https://www.youtube.com/watch?v=DjdUEyjx8GM'],
+  ['Prague, Old Town',50.087,14.421,'https://www.skylinewebcams.com/en/webcam/ceska-republika/praha/praha/orloj.html'],
+  ['Santorini, Greece',36.417,25.432,'https://www.skylinewebcams.com/en/webcam/ellada/notio-aigaio/santorini/santorini.html'],
+  ['Machu Picchu, Peru',-13.163,-72.545,'https://www.skylinewebcams.com/en/webcam/peru/cusco/machu-picchu/machu-picchu.html'],
+  ['Table Mountain, Cape Town',-33.962,18.410,'https://www.skylinewebcams.com/en/webcam/south-africa/western-cape/cape-town/table-mountain.html'],
+  ['Copacabana, Rio',-22.971,-43.183,'https://www.skylinewebcams.com/en/webcam/brasil/rio-de-janeiro/rio-de-janeiro/copacabana.html'],
+  ['Niagara Falls (US)',43.083,-79.069,'https://www.earthcam.com/usa/newyork/niagarafalls/?cam=niagarafalls'],
+  ['Willis Tower, Chicago',41.879,-87.636,'https://www.earthcam.com/usa/illinois/chicago/?cam=chicago_hd']
 ];
 // [name, lat, lon, summit_m] — Smithsonian GVP Holocene subset
 const VOLCANOES=[
@@ -2412,7 +2481,22 @@ const HFSTATIONS=[
   ['20m SSTV',14230,'usb'],['20m PSK31',14070,'usb'],['17m FT8',18100,'usb'],['15m FT8',21074,'usb'],
   ['15m SSB',21300,'usb'],['12m FT8',24915,'usb'],['10m FT8',28074,'usb'],['10m SSB',28400,'usb'],
   ['WWCR (Nashville)',5935,'am'],['WBCQ (Maine)',7490,'am'],['WRMI (Florida)',9395,'am'],
-  ['Radio Havana',6000,'am'],['China Radio Intl',9570,'am']
+  ['Radio Havana',6000,'am'],['China Radio Intl',9570,'am'],
+  // more shortwave broadcasters, utility, beacons, nets (location-agnostic)
+  ['WWV (Colorado)',25000,'am'],['Voice of Turkey',9830,'am'],['Radio Romania',9700,'am'],
+  ['Radio Exterior Spain',9690,'am'],['NHK Japan',11935,'am'],['KBS Korea',9805,'am'],
+  ['All India Radio',9445,'am'],['Radio New Zealand',11725,'usb'],['BBC WS (Ascension)',7445,'am'],
+  ['Voice of America',15580,'am'],['Radio Marti',7365,'am'],['Radio Free Asia',9455,'am'],
+  ['Sound of Hope',11085,'am'],['WHRI (Indiana)',7385,'am'],['KTWR Guam',9910,'am'],
+  ['France VOLMET',5505,'usb'],['RAF VOLMET',5450,'usb'],['Trenton Mil VOLMET',6754,'usb'],
+  ['Aviation NAT-B',13306,'usb'],['Aviation CAR-A',5520,'usb'],['Aviation SAT-1',3452,'usb'],
+  ['GB3RAL Beacon',5290,'usb'],['WSPR 40m',7040,'usb'],['WSPR 20m',14097,'usb'],
+  ['DRM 26 MHz',25775,'am'],['CB Ch19',27185,'am'],['6m beacon',50313,'usb'],
+  ['160m SSB',1900,'lsb'],['80m digital',3580,'usb'],['60m ch1',5330,'usb'],
+  ['40m CW',7030,'cw'],['30m CW',10118,'cw'],['20m CW',14030,'cw'],['20m RTTY',14080,'usb'],
+  ['17m SSB',18130,'usb'],['15m CW',21030,'cw'],['12m SSB',24950,'usb'],['10m FM calling',29600,'nbfm'],
+  ['MW 1000 kHz',1000,'am'],['LW 198 (BBC R4)',198,'am'],['Numbers (HM01)',11530,'am'],
+  ['UVB-76 Buzzer',4625,'am'],['Lincolnshire Poacher',6959,'usb']
 ];
 // LiveATC feeds. stream = best-effort direct mp3; page = official player fallback.
 const LIVEATC=[

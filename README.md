@@ -88,6 +88,9 @@ SITREP bar are all anchored to the bottom edge.
 | | Global disasters — quakes/cyclones/floods (alert-graded) | GDACS (UN/EC) | 30 min |
 | | Rocket launches (upcoming, at the pad) | Launch Library 2 | 60 min |
 | | Weather radar overlay | RainViewer | 5 min |
+| | Live seismic (real-time, global) | EMSC seismicportal | 2 min |
+| | River / flood gauges (in view) | USGS water services | 10 min |
+| | Notable places (in view) | Wikipedia geosearch | on pan |
 | | Severe-weather alert polygons | NOAA/NWS | 2 min |
 | | Aurora forecast (≥40 % probability) | NOAA SWPC OVATION | 5 min |
 | | Holocene volcanoes | Smithsonian GVP (curated static) | — |
