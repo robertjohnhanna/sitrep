@@ -217,17 +217,22 @@
       align-items:center;justify-content:center;gap:3px;min-height:44px}
     #mnav button .ic{font-size:18px;line-height:1}
     #mnav button.active{color:var(--accent)}
-    /* Selected panel fills the whole screen (top safe-area down to the nav
-       bar) and scrolls internally — an opaque full-height pull-up, so nothing
-       bleeds behind the browser chrome and long lists scroll properly. */
+    /* Selected panel fills the whole screen (below the status bar, down to the
+       nav bar) and scrolls internally. It's opaque and, when closed, fully
+       HIDDEN (visibility) — belt-and-suspenders so a closed panel can never
+       leak its rows into the strip below the nav, regardless of how iOS Safari
+       resolves the dynamic viewport. Top padding uses a hard fallback because
+       Safari (non-standalone) often reports safe-area-inset-top as 0. */
     .panel{left:0!important;right:0!important;top:0!important;width:auto!important;
       bottom:calc(54px + var(--sa-b))!important;max-height:none!important;z-index:20;
-      padding-top:var(--sa-t);background:var(--bg);
+      padding-top:max(var(--sa-t),54px)!important;background:var(--bg);
       backdrop-filter:none;-webkit-backdrop-filter:none;
-      border-radius:0;border:none;
-      transform:translateY(100%);transition:transform .28s cubic-bezier(.32,.72,.35,1);
+      border-radius:0;border:none;visibility:hidden;
+      transform:translateY(100%);
+      transition:transform .28s cubic-bezier(.32,.72,.35,1),visibility 0s linear .28s;
       box-shadow:0 -12px 40px #000a}
-    .panel.open{transform:translateY(0)}
+    .panel.open{transform:translateY(0);visibility:visible;
+      transition:transform .28s cubic-bezier(.32,.72,.35,1),visibility 0s}
     .sheet-grip{display:block;flex:0 0 auto;padding:8px 0 2px;cursor:grab}
     .sheet-grip::before{content:"";display:block;width:38px;height:4px;border-radius:2px;
       background:#2a3a4d;margin:0 auto}
