@@ -19,8 +19,9 @@
 
      Layout: a full-map canvas with a single docked SITREP panel on
      the right (on mobile, a bottom sheet). The panel lists in-view
-     signals as distance-sorted cards, then embeds the canifly
-     drone-preflight tool, both driven by the map-centre crosshair.
+     signals as distance-sorted cards, then the canifly drone-preflight
+     flyability chart — fully integrated (ported from the canifly repo,
+     no iframe), both driven by the map-centre crosshair.
 
      Map layers (all keyless, CORS-*): live aircraft (adsb), NWS
      warnings, NEXRAD radar (Iowa State Mesonet). SITREP-only feeds:
@@ -84,11 +85,85 @@
   #refresh-badge{margin-left:auto;color:var(--ink-dim);font-weight:400;letter-spacing:.5px;
     font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:0 0 auto}
   #refresh-badge b{color:var(--ink)}
-  /* canifly preflight tool sits below the cards, taking half the panel
-     height (flex-basis 50%); the cards scroll in the other half. */
-  #fly-pane{flex:0 0 50%;min-height:0;
-    border-top:1px solid var(--line);background:#000;display:flex;justify-content:center}
-  #fly-frame{width:100%;height:100%;border:0;display:block;background:#000;margin:0 auto}
+  /* ---------- canifly — the drone-preflight chart, fully integrated ----------
+     Ported from the canifly repo (which stays standalone and untouched): just
+     the flyability grid and its flip info card — no title, coordinates or
+     refresh line. The pane sits below the cards at half the panel height; it's
+     a SIZE CONTAINER, so every font and pad below is in cq units and the chart
+     scales itself to whatever box it gets — desktop dock, iPad, iPhone sheet. */
+  #fly-pane{flex:0 0 50%;min-height:0;border-top:1px solid var(--line);background:#000;
+    container-type:size;--fti:min(2.4cqh,3.3cqw);
+    display:flex;align-items:center;justify-content:center;
+    padding:min(2cqh,12px) min(3cqw,14px)}
+  /* the board is the flip box: the grid fixes its height; the info card overlays
+     it (inset:0), so flipping never changes the box size */
+  #fly-pane .board{position:relative;width:100%;max-width:560px;max-height:100%}
+  #fly-pane .grid{width:100%;border:1px solid var(--line);border-radius:12px;cursor:pointer;
+    padding:min(1.4cqh,8px) min(2cqw,10px);display:grid;
+    grid-template-columns:minmax(0,1.15fr) repeat(4,minmax(0,1fr));   /* labels + NOW..+3h */
+    align-content:center;font-variant-numeric:tabular-nums}
+  #fly-pane .grow{display:contents}
+  #fly-pane .ga,#fly-pane .gc{display:flex;align-items:center;min-width:0;white-space:nowrap;
+    padding:min(1.3cqh,2cqw) min(.6cqh,.9cqw);line-height:1}
+  #fly-pane .ga{justify-content:flex-start;color:var(--ink);letter-spacing:.03em;
+    font-size:min(2.6cqh,3.6cqw)}
+  #fly-pane .gc{justify-content:center;font-weight:700;font-size:min(3.5cqh,4.6cqw);
+    color:var(--ink);border-left:1px solid #16212b}   /* faint rule between time columns */
+  /* reference-unit tags (FT on the 400 label, MPH on the gust row's last cell) */
+  #fly-pane .gu{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
+  /* cell fills — binary: fly / can't fly */
+  #fly-pane .gc.good{background:rgba(47,224,122,.14);color:var(--ok)}
+  #fly-pane .gc.bad{background:rgba(255,68,85,.16);color:var(--danger)}
+  #fly-pane .ga.bad{color:var(--danger)}
+  #fly-pane .ghead .gc.bad{background:none;color:var(--danger)}
+  #fly-pane .ghead .ga,#fly-pane .ghead .gc{border-bottom:1px solid var(--line);
+    padding-bottom:min(.8cqh,1.2cqw);font-weight:500;font-size:min(2.6cqh,3.6cqw);color:var(--ink)}
+  #fly-pane .ghead .gc{border-left:0}
+  #fly-pane .ghead .gc.now{font-weight:700}
+  #fly-pane .ga.hi{font-weight:700}
+  #fly-pane .ggust .ga,#fly-pane .ggust .gc{border-top:1px solid rgba(116,133,150,.4)}
+  /* a cap/gate code cell (GUST/VIS/SKY/WIND/FAA/TRFC/PCPN/KPx) */
+  #fly-pane .gc.rsn{font-size:min(2.5cqh,3.4cqw);font-weight:800;letter-spacing:.03em}
+  /* loading shimmer — exactly one cell-text line tall, so nothing shifts on load */
+  @keyframes flypulse{0%,100%{opacity:1}50%{opacity:.2}}
+  #fly-pane .sk{display:block;border-radius:4px;background:var(--ink-dim);opacity:.22;
+    width:58%;height:min(3.5cqh,4.6cqw);margin:0 auto;animation:flypulse 1.6s ease-in-out infinite}
+  @media (prefers-reduced-motion:reduce){#fly-pane .sk{animation:none}}
+  /* the flip info card: gates/caps, data sources, and the two settings */
+  #fly-pane .infobox{position:absolute;inset:0;z-index:1;overflow:auto;cursor:default;
+    border:1px solid var(--line);border-radius:12px;background:#000;line-height:1.2;
+    padding:min(2.4cqh,3.6cqw) min(2.6cqh,4cqw);text-align:left;display:flex;flex-direction:column}
+  #fly-pane .iwrap{margin:auto 0}
+  #fly-pane .ihead{font-weight:700;letter-spacing:.14em;font-size:var(--fti);color:var(--ink);
+    margin:min(1.4cqh,2cqw) 0 min(.5cqh,.7cqw)}
+  #fly-pane .ihead:first-child{margin-top:0}
+  #fly-pane .irow{display:flex;justify-content:flex-start;align-items:baseline;gap:.6em;
+    padding:.18em 0;font-size:var(--fti);min-width:0}
+  #fly-pane .irow .ic{font-weight:800;color:var(--danger);letter-spacing:.05em;white-space:nowrap}
+  #fly-pane .irow .id{color:var(--ink);letter-spacing:.02em}
+  #fly-pane .irow .id.warn{color:var(--warn)}   /* that feed's last pull degraded */
+  #fly-pane .irow .isrc{font-weight:800;color:var(--ok);letter-spacing:.05em;
+    white-space:nowrap;text-decoration:none}
+  /* settings block: max wind + range, ± steppers. label left / value centre / buttons right */
+  #fly-pane .isettings{margin-top:min(2cqh,3cqw);padding-top:min(1cqh,1.6cqw);
+    border-top:1px solid rgba(116,133,150,.35)}
+  #fly-pane .irow.iset{align-items:center;gap:0}
+  #fly-pane .iset+.iset{margin-top:min(.9cqh,1.4cqw)}
+  #fly-pane .iset .isl{flex:1 1 0;text-align:left;font-weight:800;color:var(--ink);
+    letter-spacing:.05em;white-space:nowrap}
+  #fly-pane .iset .id{flex:1 1 0;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #fly-pane .iset .id.sval{cursor:pointer}          /* tap the value to reset to default */
+  #fly-pane .iset .id.sval:active{color:var(--ok)}
+  #fly-pane .iset .sgrp{flex:1 1 0;display:flex;justify-content:flex-end;align-items:center;gap:.5em}
+  /* the ± glyphs are DRAWN (centred bars), not font characters */
+  #fly-pane .iset .sbtn{width:1.6em;height:1.6em;border-radius:50%;border:1px solid var(--line);
+    background:none;font-size:var(--fti);cursor:pointer;padding:0;flex:0 0 auto;position:relative}
+  #fly-pane .iset .sbtn::before,#fly-pane .iset .sbtn.splus::after{content:"";position:absolute;
+    top:50%;left:50%;transform:translate(-50%,-50%);background:var(--ink);border-radius:1px}
+  #fly-pane .iset .sbtn::before{width:.62em;height:.11em}
+  #fly-pane .iset .sbtn.splus::after{width:.11em;height:.62em}
+  #fly-pane .iset .sbtn:active{border-color:var(--ok)}
+  #fly-pane .iset .sbtn:active::before,#fly-pane .iset .sbtn:active::after{background:var(--ok)}
 
   /* ---------- popups ---------- */
   .maplibregl-popup-content{background:var(--panel);color:var(--ink);
@@ -204,11 +279,10 @@
     .maplibregl-ctrl-bottom-right{bottom:calc(var(--navh) + 4px + var(--sa-b))}
     /* map is full-width on mobile; keep the button above the bottom nav */
     #loc-btn{right:calc(14px + var(--sa-r));bottom:calc(var(--navh) + var(--sa-b) + 14px)}
-    /* canifly's built-in "rotate to portrait" guard fires on a short (≤480px),
-       landscape-ish, touch viewport — which the embedded iframe looked like on a
-       phone (nearly square). Keep the iframe TALLER than 480px so that guard
-       never matches and canifly renders its app. */
-    #fly-pane{flex:0 0 auto;height:clamp(486px,64vh,640px)}
+    /* canifly chart on the phone/iPad sheet: a fixed tall pane (the cards scroll
+       above it). The cq-unit sizing inside then fits the grid to whatever this
+       resolves to — comfortably big on an iPhone, roomier still on an iPad. */
+    #fly-pane{flex:0 0 auto;height:clamp(340px,56vh,620px)}
   }
 </style>
 </head>
@@ -233,10 +307,11 @@
   <div id="sit-body">
     <div class="sit-empty">ACQUIRING POSITION…</div>
   </div>
-  <!-- canifly drone-preflight tool, embedded live from its own repo
-       (github.io/canifly), driven by the map centre via postMessage so it
-       tracks the crosshair like the SITREP does. -->
-  <div id="fly-pane"><iframe id="fly-frame" title="Can I Fly? — drone preflight" allow="geolocation"></iframe></div>
+  <!-- canifly drone-preflight chart — fully integrated (ported from the
+       canifly repo, which stays standalone): just the flyability grid and its
+       flip info card, driven by the map-centre crosshair and the same unified
+       data-refresh pulse as everything else. -->
+  <div id="fly-pane"><div id="fly-board" class="board" role="group" aria-label="Can I Fly? drone preflight"></div></div>
 </div>
 
 <!-- center-on-me: floating control, bottom-right of the map -->
@@ -632,7 +707,10 @@ const iconSize=base=>['interpolate',['linear'],['zoom'],2,base*1.4,6,base*2.2,11
 // The SITREP re-reads layer data as part of every refresh — debounced so a
 // burst of near-simultaneous layer updates recomputes it once, not N times.
 let sitrepRefreshT=null;
-function scheduleSitrep(){ clearTimeout(sitrepRefreshT); sitrepRefreshT=setTimeout(()=>{ try{sitrepTick();}catch(e){} },300); }
+// The canifly chart repaints on the same debounce: its TRFC traffic cells read
+// the aircraft layers, so fresh plane data must reach both views together.
+function scheduleSitrep(){ clearTimeout(sitrepRefreshT); sitrepRefreshT=setTimeout(()=>{
+  try{sitrepTick();}catch(e){} try{if(FLY.data)flyPaint();}catch(e){} },300); }
 
 // Ground elevation (ft AMSL) at a point, for AGL = baro-alt − ground. Keyless
 // Open-Meteo lookup, cached by ~0.01° cell (≈1 km, so every plane inside the
@@ -756,6 +834,10 @@ function refreshDueLayers(){
     const everyN=Math.max(1,Math.round(cfg.refresh/REFRESH_S));
     if(pulseCount%everyN===0) runLayer(cfg);
   });
+  // The canifly chart rides the SAME pulse: weather + the radar-echo sample every
+  // 30s cycle; Kp throttles itself to the 180s space-weather cadence and the FAA
+  // airspace to its location/range-keyed cache — all inside flyRefresh().
+  flyRefresh();
 }
 // data-refresh countdown ("Xs to update") in the SITREP header
 function refreshTick(){
@@ -1097,23 +1179,24 @@ async function sitrepTick(){
   const cards=[];   // [cls, icon, l1, l2, l3, action, hazard]
 
   // -- LOW AIRCRAFT PROXIMITY (top, red-title): any plane (civil / military /
-  //    emergency) within 1 mile of the crosshair AND under 1000' ABOVE GROUND
-  //    LEVEL → danger card. Reported altitude is barometric (MSL), so we look
-  //    up the ground elevation at the crosshair (cached, keyless Open-Meteo)
-  //    and subtract it: AGL = alt − ground. Recomputed every SITREP tick for
-  //    the planes currently in the radius. Ground aircraft report
-  //    alt='ground'/'?' → skipped. --
-  const inRing=[];
+  //    emergency) inside the canifly flip-card RANGE setting AND under the
+  //    WARN_AGL_FT (1,000') warning altitude → danger card. The SAME radius and
+  //    altitude drive the chart's TRFC cells, so the card and the chart always
+  //    agree. Reported altitude is barometric (MSL), so we look up the ground
+  //    elevation at the crosshair (cached, keyless Open-Meteo) and subtract it:
+  //    AGL = alt − ground. Recomputed every SITREP tick for the planes currently
+  //    in the radius. Ground aircraft report alt='ground'/'?' → skipped. --
+  const inRing=[], warnKm=RNG.mi*MI_TO_KM;
   ['src-nearair','src-mil','src-sos'].forEach(s=>featsIn(s).forEach(f=>{
     const alt=+f.properties.alt; if(!isFinite(alt)) return;
     const g=f.geometry&&f.geometry.coordinates; if(!g) return;
-    const km=havKm(lat,lon,g[1],g[0]); if(km>1.609) return;   // within one mile
+    const km=havKm(lat,lon,g[1],g[0]); if(km>warnKm) return;   // inside the set range
     inRing.push({f,km,alt,pt:g});
   }));
   if(inRing.length){
     const ground=groundElevFt(lat,lon);          // ft AMSL, null until fetched
     const lowAc=inRing.map(a=>({...a,agl:ground==null?a.alt:a.alt-ground}))
-                      .filter(a=>a.agl<1000);
+                      .filter(a=>a.agl<WARN_AGL_FT);
     if(lowAc.length){
       lowAc.sort((a,z)=>a.km-z.km); const lo=lowAc[0], p=lo.f.properties;
       const aglTxt=Math.max(0,Math.round(lo.agl))+U(' ft')+(ground==null?'':' AGL');
@@ -1226,6 +1309,11 @@ function refreshViewport(){
       refreshBase=Date.now();
     }
     sitrepTick();
+    // The canifly chart tracks the crosshair like the SITREP: refetch when the
+    // centre really moved (flyOnMove's own threshold), and repaint the overlays
+    // (TRFC / LOW AIRCRAFT share the same maths) so card and chart always agree.
+    flyOnMove();
+    try{ if(FLY.data) flyPaint(); }catch(e){}
   },450);
 }
 gl.on('moveend',refreshViewport);
@@ -1237,38 +1325,511 @@ const mnavBtns=document.querySelectorAll('#mnav button');
 function openSheet(which){
   $('#sitrep').classList.toggle('open',which==='sitrep');
   mnavBtns.forEach(b=>b.classList.toggle('active',b.dataset.p===which));
-  if(which==='sitrep') ensureFly();   // mobile: load canifly when the SITREP sheet opens
 }
 mnavBtns.forEach(b=>b.addEventListener('click',()=>openSheet(b.dataset.p)));
 // tapping the map closes any open sheet (mobile only; harmless on desktop)
 gl.on('dragstart',()=>{ if(MQ_MOBILE.matches) openSheet(''); });
 
-/* ---- CAN I FLY tab: embed canifly (own repo) and drive it from the crosshair.
-   The iframe loads lazily on first open; sitrep posts the map CENTRE to it so
-   the flyability read tracks wherever you're looking, exactly like the SITREP.
-   Contract: sitrep → canifly {type:'sitrep:loc',lat,lon}; canifly → sitrep
-   {type:'canifly:ready'} once it can accept a location. canifly stays fully
-   standalone (it only enters embed mode when it detects it's in an iframe). ---- */
-const CANIFLY_URL='https://robertjohnhanna.github.io/canifly/';
-const CANIFLY_ORIGIN=new URL(CANIFLY_URL).origin;
-let flyReady=false;
-function pushFlyLoc(){
-  const fr=$('#fly-frame');
-  if(!flyReady||!fr||!fr.contentWindow) return;
-  const c=gl.getCenter();
-  fr.contentWindow.postMessage({type:'sitrep:loc',lat:c.lat,lon:c.lng},CANIFLY_ORIGIN);
+/* =====================================================================
+   CAN I FLY — the canifly drone-preflight chart, FULLY INTEGRATED.
+   Ported from the canifly repo (that app stays standalone and untouched).
+   What's here: the flyability grid (altitudes 400→SFC × NOW/+1/+2/+3h) and
+   its flip info card with the max-wind and range settings — no title,
+   coordinates or refresh line. Location = the map-centre crosshair; data
+   rides the unified 30s refresh pulse (weather + radar sample every pulse,
+   Kp on the 180s space-weather cadence, FAA airspace via a location/range-
+   keyed cache). Two-way integration with the SITREP:
+     • the flip-card RANGE setting is also the LOW AIRCRAFT warning radius;
+     • manned traffic inside that range under the warning altitude reds its
+       altitude cell in the NOW column (its own code: TRFC);
+     • a NEXRAD echo inside that range — sampled from the SAME Iowa Mesonet
+       mosaic the radar layer draws — grounds the NOW column like the other
+       global gates (its own code: PCPN).
+   ===================================================================== */
+const M_TO_FT=3.28084, FT_TO_M=0.3048, M_TO_SM=1/1609.34, KT_TO_MPH=1.15078, MI_TO_KM=1.60934;
+const toMph=kt=>kt==null?null:kt*KT_TO_MPH;
+const comma=n=>Number(Math.round(n)).toLocaleString('en-US');
+const fmt=(n,d=0)=>(n==null||isNaN(n))?'–':Number(n).toFixed(d);
+// FAA Part 107 / physics limits — all fixed (see the canifly repo for rationale)
+const SPEC={kpMax:5,visSM:3,clrFt:500,regFt:400};
+// The traffic warning altitude [ft AGL] — ONE number shared by the SITREP's
+// LOW AIRCRAFT card and the chart's TRFC cells, so they always agree.
+const WARN_AGL_FT=1000;
+// LIM.wind = the aircraft's max wind [mph] — gates the surface gust and caps the
+// wind-aloft scan. Adjustable via the flip-card stepper, persisted per device.
+const MW_DEFAULT=27, MW_KEY='canifly.maxwind';
+const LIM={wind:MW_DEFAULT};
+try{ const v=Math.round(Number(localStorage.getItem(MW_KEY))); if(v>=1&&v<=99) LIM.wind=v; }catch(e){}
+// RNG.mi = the flip-card RANGE setting [statute miles]: the FAA airspace query
+// radius, the LOW AIRCRAFT warning radius, the TRFC traffic radius AND the PCPN
+// radar-echo radius. Adjustable ±0.5 on the flip card, persisted per device.
+const RNG_DEFAULT=1, RNG_KEY='canifly.rangemi';
+const RNG={mi:RNG_DEFAULT};
+try{ const v=Math.round(Number(localStorage.getItem(RNG_KEY))*2)/2; if(v>=0.5&&v<=15) RNG.mi=v; }catch(e){}
+// Altitude ladder, 50 ft steps through the FAA band (matches the grid rows).
+const ALTS_UP=(()=>{const a=[];for(let f=0;f<=SPEC.regFt;f+=50)a.push(f);return a;})();
+const ALTS=[...ALTS_UP].reverse();
+const FC_HOURS=3;   // forecast columns: NOW + the next 3 hourly steps
+const KP_URL='https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json';
+// FAA ArcGIS feature services (official AIS publications, CORS-open): the LAANC
+// grid ceiling + the national-defense no-fly zones, point + RNG.mi buffer.
+const FAA_GIS='https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services';
+const gisUrl=(svc,lat,lon,rng,fields)=>`${FAA_GIS}/${svc}/FeatureServer/0/query`
+  +`?geometry=${lon.toFixed(3)},${lat.toFixed(3)}&geometryType=esriGeometryPoint&inSR=4326`
+  +`&spatialRel=esriSpatialRelIntersects&distance=${rng}&units=esriSRUnit_StatuteMile`
+  +`&outFields=${fields}&returnGeometry=false&f=json`;
+const aspUrl=(lat,lon,rng)=>gisUrl('FAA_UAS_FacilityMap_Data',lat,lon,rng,'CEILING,UNIT');
+const defUrl=(lat,lon,rng)=>gisUrl('National_Defense_Airspace_TFR_Areas',lat,lon,rng,'NAME');
+const FAA_ITEM='7b6891111bc94f2db9a2c1714e6ff43f';
+const faaMapUrl=(lat,lon)=>`https://www.arcgis.com/apps/mapviewer/index.html?layers=${FAA_ITEM}&center=${lon.toFixed(3)},${lat.toFixed(3)}&level=11`;
+// Pressure levels scanned for cloud decks; lowest level ≥12% cover = the base.
+const PRES_LEVELS=[1000,975,950,925,900,850,800,700];
+const CLOUD_FEW_PCT=12;
+function aloftUrl(lat,lon){
+  const h=['wind_speed_10m','wind_speed_80m','wind_speed_120m','wind_speed_180m','wind_gusts_10m','visibility',
+    'cloud_cover_low','temperature_2m','dew_point_2m']
+    .concat(PRES_LEVELS.map(p=>`geopotential_height_${p}hPa`))
+    .concat(PRES_LEVELS.map(p=>`cloud_cover_${p}hPa`));
+  const cur=['wind_speed_10m','wind_gusts_10m','cloud_cover_low',
+    'visibility','temperature_2m','dew_point_2m']
+    .concat(PRES_LEVELS.map(p=>`cloud_cover_${p}hPa`));
+  return `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}`
+    +`&current=${cur.join(',')}`
+    +`&hourly=${h.join(',')}`
+    +`&wind_speed_unit=kn&forecast_days=2&timezone=auto`;
 }
-// load canifly the first time the DATA panel is actually shown — immediately on
-// desktop (panel always visible), on sheet-open on mobile (skips a boot fetch
-// nobody asked for).
-function ensureFly(){ const fr=$('#fly-frame'); if(fr&&!fr.getAttribute('src')) fr.src=CANIFLY_URL; }
-// once canifly signals it can take a location (or the frame just finishes
-// loading), send the current crosshair; keep it in sync as the map moves
-$('#fly-frame').addEventListener('load',()=>{ flyReady=true; pushFlyLoc(); });
-window.addEventListener('message',e=>{
-  if(e.origin===CANIFLY_ORIGIN && e.data && e.data.type==='canifly:ready'){ flyReady=true; pushFlyLoc(); }
+// Retry a flaky fetch before letting it fail — a transient blip on these public
+// feeds is almost always gone by the next attempt.
+async function retry(fn,tries=3,baseMs=600){
+  let err;
+  for(let a=0;a<tries;a++){
+    try{ return await fn(); }
+    catch(e){ err=e; if(a<tries-1) await new Promise(r=>setTimeout(r,baseMs*(a+1))); }
+  }
+  throw err;
+}
+// Open-Meteo: surface + winds aloft (height levels through the FAA band), gusts,
+// visibility, per-level cloud cover/height. One row per grid column.
+async function getAloft(lat,lon){
+  const d=await getJSON(aloftUrl(lat,lon),{timeout:15000});
+  let i=0;
+  if(d.current?.time&&d.hourly?.time){const now=d.current.time.slice(0,13);i=d.hourly.time.findIndex(t=>t.slice(0,13)===now);if(i<0)i=0;}
+  const H=d.hourly||{}, elev=d.elevation??0;
+  const gh=H.wind_gusts_10m||[];
+  const cur=d.current||{};
+  const cloudBaseAt=n=>{
+    const idx=i+n, C=k=>n===0?(cur[k]??H[k]?.[idx]):H[k]?.[idx];
+    let deckFt=null;
+    for(const p of PRES_LEVELS){
+      const cc=C(`cloud_cover_${p}hPa`), ghm=H[`geopotential_height_${p}hPa`]?.[idx]??H[`geopotential_height_${p}hPa`]?.[i];
+      if(cc==null||ghm==null) continue;
+      const agl=(ghm-elev)*M_TO_FT; if(agl<=0) continue;
+      if(cc>=CLOUD_FEW_PCT){ deckFt=agl; break; }
+    }
+    const low=C('cloud_cover_low'), T=C('temperature_2m'), Td=C('dew_point_2m');
+    const lclFt=((low??0)>=CLOUD_FEW_PCT && T!=null && Td!=null)?Math.max(0,Math.round((T-Td)*410)):null;
+    let baseFt=null; for(const v of [deckFt,lclFt]) if(v!=null) baseFt=(baseFt==null?v:Math.min(baseFt,v));
+    return baseFt;
+  };
+  const profAt=n=>{const idx=i+n;
+    const w10=n===0?(d.current?.wind_speed_10m??H.wind_speed_10m?.[idx]):H.wind_speed_10m?.[idx];
+    return [{h:10,w:w10},{h:80,w:H.wind_speed_80m?.[idx]},{h:120,w:H.wind_speed_120m?.[idx]},{h:180,w:H.wind_speed_180m?.[idx]}]
+      .filter(x=>x.w!=null&&!isNaN(x.w)).sort((a,b)=>a.h-b.h);};
+  const gustAt =n=>n===0?(d.current?.wind_gusts_10m??gh[i]):gh[i+n];
+  const visAt  =n=>n===0?(cur.visibility??H.visibility?.[i]):H.visibility?.[i+n];
+  const cols=[];
+  for(let n=0;n<=FC_HOURS;n++){
+    cols.push({n, windPts:profAt(n), gustKt:gustAt(n), baseFt:cloudBaseAt(n), visM:visAt(n)});
+  }
+  return {cols};
+}
+// NOAA SWPC planetary-Kp forecast: the current 3-hour bin + the next, so each
+// grid hour picks the value in force when it arrives.
+async function getKp(){
+  const d=await getJSON(KP_URL,{timeout:9000});
+  if(!Array.isArray(d)||d.length===0) return null;
+  const arrHdr=Array.isArray(d[0]);
+  const src=arrHdr?d.slice(1):d;
+  const rows=src.map(r=>{
+    const t=arrHdr?r[0]:r.time_tag, kp=Number(arrHdr?r[1]:r.kp);
+    return {ms:Date.parse((t||'').replace(' ','T')+'Z'), kp};
+  }).filter(x=>!isNaN(x.ms)&&!isNaN(x.kp)).sort((a,b)=>a.ms-b.ms);
+  if(!rows.length) return null;
+  const now=Date.now();
+  let cur=rows[0];
+  for(const r of rows) if(r.ms<=now) cur=r;
+  let next=null, nextMs=Infinity;
+  for(const r of rows){ if(r.ms>now && r.ms<nextMs){ next=r.kp; nextMs=r.ms; } }
+  return {now:cur.kp, next, nextMs:next!=null?nextMs:null};
+}
+// FAA airspace within `rng` mi: worst LAANC grid ceiling; a defense zone in
+// range forces 0 (no-fly). A LEGAL warning, so anything that could quietly
+// understate a restriction THROWS (→ amber via fail-open), never reads "clear".
+async function getAirspace(lat,lon,rng){
+  const [grid,def]=await Promise.all([ getJSON(aspUrl(lat,lon,rng),{timeout:9000}), getJSON(defUrl(lat,lon,rng),{timeout:9000}) ]);
+  if(grid.error||!Array.isArray(grid.features)) throw new Error('airspace grid query failed');
+  if(def.error ||!Array.isArray(def.features))  throw new Error('defense-airspace query failed');
+  if(grid.exceededTransferLimit||def.exceededTransferLimit) throw new Error('airspace result truncated');
+  let ceil=SPEC.regFt;
+  for(const f of grid.features){
+    const a=f&&f.attributes;
+    const c=(a&&typeof a.CEILING==='number')?a.CEILING:NaN;
+    if(!Number.isFinite(c)||c<0||c>10000) throw new Error('airspace cell has no usable ceiling');
+    if(a.UNIT!=null&&!/^f/i.test(String(a.UNIT))) throw new Error('airspace ceiling in unexpected units');
+    ceil=Math.min(ceil,c);
+  }
+  if(def.features.length>0) ceil=0;
+  return {ceilFt:ceil};
+}
+// wind(ft) → knots, linearly interpolating the sparse model levels
+function makeProfile(pts){
+  const p=(pts||[]).filter(x=>x&&x.w!=null&&!isNaN(x.w)).sort((a,b)=>a.h-b.h);
+  return function(ft){
+    if(p.length===0) return null;
+    const m=ft*FT_TO_M;
+    if(m<=p[0].h) return p[0].w;
+    if(m>=p[p.length-1].h) return p[p.length-1].w;
+    for(let i=0;i<p.length-1;i++){if(m>=p[i].h&&m<=p[i+1].h){const t=(m-p[i].h)/(p[i+1].h-p[i].h);return p[i].w+t*(p[i+1].w-p[i].w);}}
+    return p[p.length-1].w;
+  };
+}
+// Airspace cache — LAANC is near-static (56-day chart cycle), and the FAA service
+// is shared and rate-limited, so re-query only when the location or range really
+// changes (or the TTL ages out). Persisted so reloads reuse it.
+const ASP_CACHE_KEY='canifly.asp';
+const ASP_TTL=6*60*60*1000, ASP_HARD_TTL=24*60*60*1000;
+const ASP_TOL_KM=0.15;   // GPS/crosshair jitter tolerance — small next to the ≥0.5 mi radius
+let aspCache=null;
+function hydrateAsp(){
+  try{ const s=JSON.parse(localStorage.getItem(ASP_CACHE_KEY)||'null');
+    if(s&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&Number.isFinite(s.rng)
+       &&Number.isFinite(s.ceilFt)&&s.ceilFt>=0&&s.ceilFt<=SPEC.regFt
+       &&Number.isFinite(s.ts)&&(Date.now()-s.ts)<ASP_HARD_TTL){ aspCache=s; } }catch(e){}
+}
+function persistAsp(){ try{ localStorage.setItem(ASP_CACHE_KEY,JSON.stringify(aspCache)); }catch(e){} }
+
+// ---- PCPN: is there NEXRAD reflectivity within the flip-card range? Samples the
+// SAME Iowa Mesonet mosaic the map's radar layer draws, at its native z8, on an
+// offscreen canvas. Returns true/false, or null when the tiles can't be read
+// (load/CORS failure) — unknown fails OPEN (no gate) and ambers the info rows. ----
+const RADAR_Z=8, RADAR_ALPHA=80, RADAR_MIN_PX=2;
+let radarMemo=null;   // {key,val}: identical minute+point+range → reuse, skip the decode/scan
+async function sampleRadarPrecip(lat,lon,rngMi){
+  const n=1<<RADAR_Z, d=Math.PI/180;
+  const xf=(lon+180)/360*n;
+  const yf=(1-Math.log(Math.tan(lat*d)+1/Math.cos(lat*d))/Math.PI)/2*n;
+  if(!isFinite(yf)||yf<0||yf>=n) return false;         // poles — no NEXRAD there anyway
+  const mPerPx=40075016.686*Math.cos(lat*d)/(n*256);   // metres per mosaic pixel at this lat
+  const rPx=Math.max(1,rngMi*MI_TO_KM*1000/mPerPx);
+  const cx=xf*256, cy=yf*256;                          // global pixel coords at z8
+  const tx0=Math.floor((cx-rPx)/256), tx1=Math.floor((cx+rPx)/256);
+  const ty0=Math.max(0,Math.floor((cy-rPx)/256)), ty1=Math.min(n-1,Math.floor((cy+rPx)/256));
+  // per-minute cache key — the mosaic itself only updates on that order, so two
+  // 30s pulses inside the same minute reuse the memoised verdict (and the browser
+  // cache) instead of re-decoding and re-scanning identical pixels
+  const bust=Math.floor(Date.now()/60000);
+  const key=bust+'|'+lat.toFixed(3)+'|'+lon.toFixed(3)+'|'+rngMi;
+  if(radarMemo&&radarMemo.key===key) return radarMemo.val;
+  const tiles=[];
+  for(let tx=tx0;tx<=tx1;tx++)for(let ty=ty0;ty<=ty1;ty++)
+    tiles.push({x:((tx%n)+n)%n,y:ty,px:(tx-tx0)*256,py:(ty-ty0)*256});
+  const imgs=await Promise.all(tiles.map(t=>new Promise((res,rej)=>{
+    const im=new Image(); im.crossOrigin='anonymous';
+    im.onload=()=>res({t,im}); im.onerror=()=>rej(new Error('radar tile failed'));
+    im.src=RADAR_URL.replace('{z}',RADAR_Z).replace('{x}',t.x).replace('{y}',t.y)+'?'+bust;
+  })));
+  const w=(tx1-tx0+1)*256, h=(ty1-ty0+1)*256;
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  const ctx=cv.getContext('2d',{willReadFrequently:true});
+  imgs.forEach(({t,im})=>ctx.drawImage(im,t.px,t.py));
+  const px=ctx.getImageData(0,0,w,h).data;   // throws on a tainted canvas → caller catches → null
+  const ox=cx-tx0*256, oy=cy-ty0*256;
+  const x0=Math.max(0,Math.floor(ox-rPx)), x1=Math.min(w-1,Math.ceil(ox+rPx));
+  const y0=Math.max(0,Math.floor(oy-rPx)), y1=Math.min(h-1,Math.ceil(oy+rPx));
+  let hits=0, found=false;
+  for(let y=y0;y<=y1&&!found;y++)for(let x=x0;x<=x1;x++){
+    const dx=x-ox, dy=y-oy; if(dx*dx+dy*dy>rPx*rPx) continue;
+    if(px[(y*w+x)*4+3]>=RADAR_ALPHA && ++hits>=RADAR_MIN_PX){ found=true; break; }   // ≥2 px kills speckle
+  }
+  radarMemo={key,val:found};
+  return found;
+}
+
+// ---- TRFC: the NOW-column altitude rows occupied by manned traffic — every
+// plane (civil/military/emergency) inside the flip-card range and under the
+// warning altitude, its AGL rounded to the nearest 50 ft row. Traffic just above
+// the 400 ft band (but under the warning altitude) clamps to the top row: it
+// still denies the top of the band (FAA give-way). Same maths as the SITREP's
+// LOW AIRCRAFT card, so card and chart always agree. ----
+function flyTrafficRows(){
+  const c=gl.getCenter(), rows=new Set(), warnKm=RNG.mi*MI_TO_KM;
+  const ground=groundElevFt(c.lat,c.lng);   // ft AMSL, null until the cached fetch lands
+  ['src-nearair','src-mil','src-sos'].forEach(s=>featsIn(s).forEach(f=>{
+    const alt=+f.properties.alt; if(!isFinite(alt)) return;
+    const g=f.geometry&&f.geometry.coordinates; if(!g) return;
+    if(havKm(c.lat,c.lng,g[1],g[0])>warnKm) return;
+    const agl=ground==null?alt:alt-ground;
+    if(agl>=WARN_AGL_FT) return;
+    rows.add(Math.max(0,Math.min(SPEC.regFt,Math.round(agl/50)*50)));
+  }));
+  return rows;
+}
+
+// ---- state + render pipeline ----
+const FLY={
+  data:null,     // last good {lat,lon,aloft,kp,asp} — lat/lon = where it was fetched
+  detail:null,   // computed render model (kept for tests/debug)
+  info:false,    // board flipped to the info card?
+  precip:null,   // radar echo within RNG.mi? true / false / null (unknown → fail open)
+  err:{om:false,kp:false,asp:false,radar:false},
+};
+window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // debug/test handle
+
+// Apply every gate and build the render model — the canifly paint() core, plus
+// the two sitrep integrations (TRFC cells, PCPN gate).
+function flyComputeDetail(){
+  const {aloft,kp,asp}=FLY.data;
+  const aspCapFt=asp==null?SPEC.regFt:(asp.ceilFt<=0?-1:Math.min(SPEC.regFt,asp.ceilFt));
+  const atLim=kt=>kt!=null&&Math.round(toMph(kt))>=LIM.wind;
+  const one=kt=>kt==null?'—':fmt(toMph(kt),0);
+  const cols=(aloft&&aloft.cols)||[];
+  const nowMs=Date.now();
+  const kpAt=n=>{ if(!kp) return null; return (kp.next!=null&&kp.nextMs!=null&&nowMs+n*3600e3>=kp.nextMs)?kp.next:kp.now; };
+  const traffic=flyTrafficRows();
+  const grid=cols.map((c,n)=>{
+    const prof=makeProfile(c.windPts);
+    const visSM=c.visM!=null?c.visM*M_TO_SM:null;
+    const kpv=kpAt(n);
+    const gGust=atLim(c.gustKt), gVis=visSM!=null&&visSM<SPEC.visSM, gKp=kpv!=null&&kpv>=SPEC.kpMax;
+    // PCPN — radar is a NOW product, so only the NOW column can carry the gate
+    const gPcpn=n===0&&FLY.precip===true;
+    const globalGrounded=gGust||gVis||gKp||gPcpn;
+    const cloudCapFt=c.baseFt==null?Infinity:(c.baseFt-SPEC.clrFt);
+    let hitFt=null; for(const ft of ALTS_UP){ if(atLim(prof(ft))){ hitFt=ft; break; } }
+    const windCeilFt=hitFt==null?SPEC.regFt:hitFt-50;
+    const capFt=Math.min(SPEC.regFt, cloudCapFt, windCeilFt, aspCapFt);
+    const grounded=globalGrounded||capFt<0;
+    let maxFly=-1;
+    if(!grounded) for(const ft of ALTS){ if(ft<=capFt){ maxFly=ft; break; } }
+    const capSrc=(aspCapFt<=cloudCapFt&&aspCapFt<=windCeilFt)?'FAA':(cloudCapFt<=windCeilFt?'SKY':'WIND');
+    let reasonAlt=null, reason='';
+    if(grounded){
+      reasonAlt=0;
+      reason = aspCapFt<0 ? 'FAA'
+             : gGust ? 'GUST'
+             : gVis ? 'VIS'
+             : gPcpn ? 'PCPN'
+             : gKp ? ('KP'+Math.round(kpv))
+             : capSrc;
+    }else if(maxFly<SPEC.regFt){
+      reasonAlt=maxFly+50; reason=capSrc;
+    }
+    return {n,prof,gustKt:c.gustKt,capFt,maxFly,grounded,reason,reasonAlt};
+  });
+  const cellState=(g,ft)=>{
+    if(g.grounded) return 'bad';
+    if(g.n===0&&traffic.has(ft)) return 'bad';   // manned traffic at this altitude NOW
+    const kt=g.prof(ft); if(kt==null) return '';
+    if(ft>g.capFt||atLim(kt)) return 'bad';
+    return 'good';
+  };
+  const nowMaxFly=grid.length?grid[0].maxFly:-1;
+  const colLabels=grid.map(g=>({v:g.n===0?'now':'+'+g.n+'h', st:g.grounded?'bad':'', now:g.n===0}));
+  const topFt=ALTS[0];
+  const altRows=ALTS.map(ft=>{
+    const cells=grid.map(g=>{
+      if(g.reasonAlt===ft) return {v:g.reason, st:cellState(g,ft), rsn:true};   // the column's own code wins its cell
+      if(g.n===0&&traffic.has(ft)) return {v:'TRFC', st:'bad', rsn:true};       // traffic reds its altitude, NOW column
+      return {v:one(g.prof(ft)), st:cellState(g,ft)};
+    });
+    // hi = the bold "highest you can fly right now" label — suppressed when manned
+    // traffic occupies that exact row (a red TRFC cell can't also be the ceiling)
+    return {a:ft===0?'sfc':comma(ft), u:ft===topFt?'ft':'',
+      st:cells.length&&cells[0].st==='bad'?'bad':'',
+      hi:nowMaxFly>=0&&ft===nowMaxFly&&!traffic.has(ft), cells};
+  });
+  const gustCells=grid.map((g,i)=>({v:one(g.gustKt), st:atLim(g.gustKt)?'bad':'',
+    u:i===grid.length-1?'mph':''}));
+  const gustSt=gustCells.length&&gustCells[0].st==='bad'?'bad':'';
+  return {board:{colLabels,gustCells,gustSt,altRows},
+    grid:grid.map(g=>({n:g.n,maxFly:g.maxFly,grounded:g.grounded,reason:g.reason,reasonAlt:g.reasonAlt}))};
+}
+
+const FLY_GRID_ATTRS='class="grid" tabindex="0" title="Tap for limits &amp; data"';
+function flyBoardHtml(b){
+  const unit=u=>u?`<i class="gu">${u}</i>`:'';
+  const cell=c=>`<span class="gc${c.st?' '+c.st:''}${c.rsn?' rsn':''}">${c.v==null?'':c.v}${unit(c.u)}</span>`;
+  const head=`<div class="grow ghead"><span class="ga"></span>${b.colLabels.map(l=>`<span class="gc${l.st?' '+l.st:''}${l.now?' now':''}">${l.v}</span>`).join('')}</div>`;
+  const alts=b.altRows.map(r=>`<div class="grow"><span class="ga${r.st?' '+r.st:''}${r.hi?' hi':''}">${r.a}${unit(r.u)}</span>${r.cells.map(cell).join('')}</div>`).join('');
+  const gust=`<div class="grow ggust"><span class="ga${b.gustSt?' '+b.gustSt:''}">gust</span>${b.gustCells.map(cell).join('')}</div>`;
+  return `<div ${FLY_GRID_ATTRS}>${head}${alts}${gust}</div>`;
+}
+// pre-data skeleton: the real grid frame with shimmer bars, so nothing shifts on load
+function flySkeletonHtml(){
+  const sk='<span class="gc"><i class="sk"></i></span>'.repeat(1+FC_HOURS);
+  const cols=['now',...Array.from({length:FC_HOURS},(_,k)=>'+'+(k+1)+'h')];
+  const head='<div class="grow ghead"><span class="ga"></span>'
+    +cols.map((l,i)=>`<span class="gc${i===0?' now':''}">${l}</span>`).join('')+'</div>';
+  const rows=ALTS.map(ft=>`<div class="grow"><span class="ga">${ft===0?'sfc':comma(ft)}${ft===ALTS[0]?'<i class="gu">ft</i>':''}</span>${sk}</div>`).join('');
+  const gust=`<div class="grow ggust"><span class="ga">gust</span>${sk}</div>`;
+  return `<div ${FLY_GRID_ATTRS}>${head}${rows}${gust}</div>`;
+}
+// The flip info card — built from the SAME constants the gates use. An amber
+// description = that feed's last pull degraded (the chart fails open and flags it).
+function flyInfoHtml(){
+  const hasLoc=FLY.data!=null;
+  const omUrl=hasLoc?aloftUrl(FLY.data.lat,FLY.data.lon):'https://open-meteo.com/';
+  const faaUrl=hasLoc?faaMapUrl(FLY.data.lat,FLY.data.lon):`https://www.arcgis.com/home/item.html?id=${FAA_ITEM}`;
+  const w=k=>FLY.err[k]?' warn':'';
+  const wac=['nearair','mil','sos'].some(id=>LAYER_STATE[id]&&LAYER_STATE[id].errored)?' warn':'';
+  return `<div class="infobox" role="region" aria-label="Limits and data sources"><div class="iwrap">`
+    +`<div class="ihead">Ceiling values</div>`
+    +`<div class="irow"><span class="ic">faa</span><span class="id${w('asp')}">laanc &middot; defense &middot; ${SPEC.regFt} ft</span></div>`
+    +`<div class="irow"><span class="ic">wind</span><span class="id${w('om')}">&ge; ${LIM.wind} mph at altitude</span></div>`
+    +`<div class="irow"><span class="ic">sky</span><span class="id${w('om')}">cloud base &minus; ${SPEC.clrFt} ft</span></div>`
+    +`<div class="irow"><span class="ic">trfc</span><span class="id${wac}">aircraft &lt; ${comma(WARN_AGL_FT)} ft in range</span></div>`
+    +`<div class="ihead">Grounding values</div>`
+    +`<div class="irow"><span class="ic">gust</span><span class="id${w('om')}">&ge; ${LIM.wind} mph at surface</span></div>`
+    +`<div class="irow"><span class="ic">vis</span><span class="id${w('om')}">&lt; ${SPEC.visSM} sm</span></div>`
+    +`<div class="irow"><span class="ic">pcpn</span><span class="id${w('radar')}">radar echo in range</span></div>`
+    +`<div class="irow"><span class="ic">kp</span><span class="id${w('kp')}">&ge; ${SPEC.kpMax}</span></div>`
+    +`<div class="ihead">Data values</div>`
+    +`<div class="irow"><a class="isrc" href="${faaUrl}" target="_blank" rel="noopener">faa</a><span class="id${w('asp')}">airspace</span></div>`
+    +`<div class="irow"><a class="isrc" href="${omUrl}" target="_blank" rel="noopener">open-meteo</a><span class="id${w('om')}">wind &middot; vis &middot; sky</span></div>`
+    +`<div class="irow"><a class="isrc" href="${KP_URL}" target="_blank" rel="noopener">noaa swpc</a><span class="id${w('kp')}">kp</span></div>`
+    +`<div class="irow"><a class="isrc" href="https://mesonet.agron.iastate.edu/GIS/" target="_blank" rel="noopener">nexrad</a><span class="id${w('radar')}">pcpn radar</span></div>`
+    +`<div class="irow"><a class="isrc" href="https://airplanes.live/" target="_blank" rel="noopener">ads-b</a><span class="id${wac}">trfc aircraft</span></div>`
+    +`<div class="isettings">`
+    +`<div class="irow iset"><span class="isl">max wind</span>`
+    +`<span class="id sval" id="mw-val" role="button" tabindex="0" title="Tap to reset to ${MW_DEFAULT} mph">${LIM.wind} mph</span>`
+    +`<span class="sgrp">`
+    +`<button type="button" class="sbtn" id="mw-minus" aria-label="Decrease max wind 1 mph"></button>`
+    +`<button type="button" class="sbtn splus" id="mw-plus" aria-label="Increase max wind 1 mph"></button></span></div>`
+    +`<div class="irow iset"><span class="isl">range</span>`
+    +`<span class="id sval" id="rng-val" role="button" tabindex="0" title="Tap to reset to ${RNG_DEFAULT.toFixed(1)} mi">${RNG.mi.toFixed(1)} mi</span>`
+    +`<span class="sgrp">`
+    +`<button type="button" class="sbtn" id="rng-minus" aria-label="Decrease range half a mile"></button>`
+    +`<button type="button" class="sbtn splus" id="rng-plus" aria-label="Increase range half a mile"></button></span></div>`
+    +`</div></div></div>`;
+}
+function flyRender(){
+  const board=$('#fly-board'); if(!board) return;
+  board.innerHTML=FLY.detail?flyBoardHtml(FLY.detail.board):flySkeletonHtml();
+  if(FLY.info) board.insertAdjacentHTML('beforeend',flyInfoHtml());
+}
+function flyPaint(){ FLY.detail=FLY.data?flyComputeDetail():null; flyRender(); }
+function flyShowInfo(){ FLY.info=true; flyRender(); }
+function flyShowChart(){ FLY.info=false; flyRender(); }
+
+// ---- settings ----
+// Max wind: ±1 mph, clamped 1–99, persisted. Pure local math → recompute + repaint.
+function setMaxWind(w){
+  w=Math.max(1,Math.min(99,Math.round(w)));
+  if(!Number.isFinite(w)||w===LIM.wind) return;
+  LIM.wind=w;
+  try{ localStorage.setItem(MW_KEY,String(w)); }catch(e){}
+  flyPaint();
+}
+// Range: ±0.5 mi, clamped 0.5–15, persisted. Changes the FAA query, the radar
+// sample AND the SITREP low-aircraft radius — repaint + SITREP recompute now,
+// refetch debounced past a burst of presses.
+let rngFetchTimer=null;
+function setRange(mi){
+  mi=Math.max(0.5,Math.min(15,Math.round(mi*2)/2));
+  if(!Number.isFinite(mi)||mi===RNG.mi) return;
+  RNG.mi=mi;
+  try{ localStorage.setItem(RNG_KEY,String(RNG.mi)); }catch(e){}
+  flyPaint(); scheduleSitrep();
+  clearTimeout(rngFetchTimer);
+  rngFetchTimer=setTimeout(flyRefresh,700);
+}
+// One handler drives the flip. A stepper press adjusts its setting (never flips);
+// tapping a setting's value resets it. With the grid showing, a tap on it flips to
+// the info card; with the card showing, a tap anywhere outside the settings block
+// and links flips back.
+document.addEventListener('click',e=>{
+  const step=e.target.closest('#mw-minus,#mw-plus,#rng-minus,#rng-plus');
+  if(step){
+    if(step.id[0]==='m') setMaxWind(LIM.wind+(step.id==='mw-plus'?1:-1));
+    else setRange(RNG.mi+(step.id==='rng-plus'?0.5:-0.5));
+    return;
+  }
+  const val=e.target.closest('#mw-val,#rng-val');
+  if(val){ if(val.id==='mw-val') setMaxWind(MW_DEFAULT); else setRange(RNG_DEFAULT); return; }
+  if(FLY.info){
+    if(e.target.closest('.isettings')||e.target.closest('#fly-pane a')) return;
+    flyShowChart();
+  }else if(e.target.closest('#fly-pane .grid')) flyShowInfo();
 });
-gl.on('moveend',pushFlyLoc);
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ if(FLY.info) flyShowChart(); return; }
+  if(e.key!=='Enter'&&e.key!==' ') return;
+  const t=e.target;
+  const val=t&&t.closest?t.closest('#mw-val,#rng-val'):null;
+  if(val){ e.preventDefault(); if(val.id==='mw-val') setMaxWind(MW_DEFAULT); else setRange(RNG_DEFAULT); return; }
+  if(!FLY.info&&t&&t.closest&&t.closest('#fly-pane .grid')){ e.preventDefault(); flyShowInfo(); }
+});
+
+// ---- refresh — called from the unified 30s pulse, on viewport moves, on range
+// changes and at boot. Weather + the radar sample go every call; Kp re-fetches on
+// the 180s space-weather cadence; airspace via its cache. SINGLE-FLIGHT: while a
+// refresh is in the air new calls just flag a trailing re-run (which then reads
+// the fresh centre/range) — so a pan burst or a pulse landing mid-fetch can never
+// stack concurrent hits on the rate-limited FAA service. A failed weather pull
+// keeps the stale grid, never wipes. ----
+let flyBusy=false, flyAgain=false, flyKpAt=0;
+const KP_STALE_MS=15*60*1000;   // a transient SWPC blip may not wipe a recent Kp
+async function flyRefresh(){
+  if(flyBusy){ flyAgain=true; return; }
+  flyBusy=true;
+  try{
+    const c=gl.getCenter();
+    const base={lat:c.lat,lon:c.lng};
+    const rngMi=RNG.mi;   // snapshot — the radius can't shift mid-fetch
+    if(aspCache==null) hydrateAsp();
+    const cc=aspCache;
+    const matches=cc!=null&&cc.rng===rngMi&&havKm(base.lat,base.lon,cc.lat,cc.lon)<ASP_TOL_KM;
+    const age=cc!=null?Date.now()-cc.ts:Infinity;
+    const fresh=matches&&age<ASP_TTL;
+    const kpKeep=FLY.data!=null&&FLY.data.kp!=null&&Date.now()-flyKpAt<170000;
+    const [aloft,kpRaw,aspRaw,precip]=await Promise.all([
+      retry(()=>getAloft(base.lat,base.lon)).catch(()=>null),
+      kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp()).catch(()=>null),
+      fresh?Promise.resolve({ceilFt:cc.ceilFt}):retry(()=>getAirspace(base.lat,base.lon,rngMi)).catch(()=>null),
+      retry(()=>sampleRadarPrecip(base.lat,base.lon,rngMi),2).catch(()=>null),
+    ]);
+    if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();   // a genuinely fresh Kp resets its clock
+    // Kp fetch failed: fall back to the recent last-good value rather than losing
+    // the gate to one blip; beyond KP_STALE_MS stay null and amber (unknown ≠ calm).
+    let kp=kpRaw;
+    if(kp==null&&FLY.data&&FLY.data.kp!=null&&Date.now()-flyKpAt<KP_STALE_MS) kp=FLY.data.kp;
+    let asp=aspRaw;
+    if(asp!=null){ if(!fresh){ aspCache={lat:base.lat,lon:base.lon,rng:rngMi,ceilFt:asp.ceilFt,ts:Date.now()}; persistAsp(); } }
+    // failed refetch: fall back to a MATCHING cache only, within the hard TTL —
+    // beyond that stay null and amber (unknown ≠ clear)
+    else if(matches&&age<ASP_HARD_TTL) asp={ceilFt:cc.ceilFt};
+    FLY.precip=precip; FLY.err.radar=precip==null;
+    if(aloft){
+      FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
+      FLY.err.om=false; FLY.err.asp=asp==null;
+    }else{
+      FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
+      if(FLY.data){ FLY.data.kp=kp; if(asp!=null){ FLY.data.asp=asp; FLY.err.asp=false; } }
+    }
+    FLY.err.kp=kp==null;
+    flyPaint();
+  }finally{
+    flyBusy=false;
+    if(flyAgain){ flyAgain=false; flyRefresh(); }
+  }
+}
+// viewport changed: refetch only when the crosshair really moved (zoom-only view
+// changes reuse the data in place). The threshold matches the airspace cache
+// tolerance, so any pan big enough to matter legally also refreshes the chart.
+function flyOnMove(){
+  if(FLY.data&&havKm(FLY.data.lat,FLY.data.lon,gl.getCenter().lat,gl.getCenter().lng)<ASP_TOL_KM) return;
+  flyRefresh();
+}
 
 /* =====================================================================
    13. BOOT
@@ -1284,7 +1845,7 @@ gl.on('load',()=>{
   loadKp();   setInterval(loadKp,180000);   // space weather: planetary Kp (SITREP card)
   loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare (SITREP card)
   setMapPadding();
-  if(!MQ_MOBILE.matches) ensureFly();   // desktop: SITREP panel is always visible → load canifly now
+  flyRender(); flyRefresh();   // canifly chart: skeleton now, first data pull immediately
   locate();
   sitrepTick(); // SITREP works off the map area, even before a location fix
   if(!sitrepTimer) sitrepTimer=setInterval(sitrepTick,90000);
