@@ -338,49 +338,16 @@ async function adsb(path){
   }
   throw err||new Error('all ADS-B hosts unreachable');
 }
-// Aircraft in the CURRENT MAP AREA. The CORS-open readsb mirrors cap point
-// queries at 250 nm, so we tile the visible bounds with as many 250-nm cells
-// as it takes (1 when zoomed in, a few for a region), merge and dedupe by hex.
-// Refetched on every map move and once a minute. A budget caps the cell count
-// so an extreme zoom-out samples rather than firing hundreds of requests.
+// Aircraft near the MAP CENTRE — one single 250-nm point query, nothing fancy.
+// The readsb mirrors cap point queries at 250 nm; that one circle around the
+// centre is plenty and dead reliable. Refetched on every map move and once a
+// minute. adsb() throws if every mirror is unreachable, which the runtime
+// treats as an error (keeps the planes already on the map + retries) rather
+// than a "zero aircraft" wipe.
 async function adsbViewport(){
-  // Too zoomed out to be useful — and fanning the whole globe into ~20 tile
-  // requests here is exactly what rate-limits the mirrors and makes the next
-  // (real, zoomed-in) fetch fail. Return empty until the view is regional; the
-  // planes load the moment you zoom/fly in. Deliberate empty, not an error.
-  if(gl.getZoom()<4) return {ac:[]};
-  const b=gl.getBounds();
-  const S=b.getSouth(),N=b.getNorth(),W=b.getWest(),E=b.getEast();
-  const midLat=(N+S)/2;
-  const latSpan=Math.max(0.02,N-S);
-  const lonSpan=Math.max(0.02,(E-W))*Math.max(0.15,Math.cos(midLat*Math.PI/180));
-  const COVER=6;          // degrees a 250-nm cell usefully covers
-  const MAX_CELLS=20;     // per-refresh request budget
-  let rows=Math.max(1,Math.ceil(latSpan/COVER));
-  let cols=Math.max(1,Math.ceil(lonSpan/COVER));
-  while(rows*cols>MAX_CELLS){ (cols>=rows?cols--:rows--); }  // shrink to budget when zoomed way out
-  const centers=[];
-  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++)
-    centers.push([S+(N-S)*(r+0.5)/rows, W+(E-W)*(c+0.5)/cols]);
-  const seen=new Set(), ac=[];
-  const results=await Promise.allSettled(
-    centers.map(([la,lo])=>adsb('/point/'+la.toFixed(3)+'/'+lo.toFixed(3)+'/250')));
-  let ok=0;
-  results.forEach(r=>{
-    if(r.status!=='fulfilled') return;
-    ok++;
-    (r.value.ac||[]).forEach(a=>{
-      const id=a.hex||a.r||(a.lat+','+a.lon);   // dedupe overlap between cells
-      if(seen.has(id)) return; seen.add(id);
-      ac.push(a);
-    });
-  });
-  // Critical: if EVERY cell request failed this is a network error, NOT "zero
-  // aircraft in view". Throwing makes the runtime keep the planes already on
-  // the map and retry shortly, instead of wiping them with an empty (but
-  // technically successful) update that then sits stale until the 60s refresh.
-  if(ok===0 && centers.length) throw new Error('all ADS-B cells failed');
-  return {ac};
+  const c=gl.getCenter();
+  const j=await adsb('/point/'+c.lat.toFixed(3)+'/'+c.lng.toFixed(3)+'/250');
+  return {ac:j.ac||[]};
 }
 function acFeatures(j,kind){
   return (j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null).map(a=>({
@@ -598,7 +565,7 @@ const USER={lat:null,lon:null,place:'',region:'',cc:'',src:null};
 
 /* ---------------- Movement ---------------- */
 defLayer({
-  id:'nearair', label:'Aircraft (in view)', color:'#2fe07a', group:'air', refresh:60,
+  id:'nearair', label:'Aircraft (250 nm)', color:'#2fe07a', group:'air', refresh:60,
   icon:'ac-near', rotate:true, iconSize:0.6,
   // every civil (non-military) aircraft in the current map area; refetched on
   // pan/zoom (see moveend) and once a minute
@@ -609,14 +576,14 @@ defLayer({
 });
 
 defLayer({
-  id:'mil', label:'Military aircraft', color:'#ffce4d', group:'air', refresh:60,
+  id:'mil', label:'Military aircraft', color:'#ffce4d', group:'air', refresh:60, defaultOff:true,
   icon:'ac-mil', rotate:true, iconSize:0.5,
   loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')}),
   popup:acPopup
 });
 
 defLayer({
-  id:'sos', label:'Emergency squawks', color:'#ff4455', group:'air', refresh:60, bg:true,
+  id:'sos', label:'Emergency squawks', color:'#ff4455', group:'air', refresh:60, defaultOff:true, bg:true,
   icon:'ac-sos', rotate:true, iconSize:0.6,
   loader: async ()=>{
     // 7700 = general emergency, 7600 = radio failure, 7500 = unlawful interference
@@ -695,7 +662,7 @@ defLayer({
 });
 
 defLayer({
-  id:'amtrak', label:'Amtrak trains', color:'#ffce4d', group:'surface', refresh:60, icon:'veh-train', iconSize:0.6,
+  id:'amtrak', label:'Amtrak trains', color:'#ffce4d', group:'surface', refresh:60, defaultOff:true, icon:'veh-train', iconSize:0.6,
   loader: async ()=>{
     const j=await getJSON('https://api-v3.amtraker.com/v3/trains');
     const feats=[];
@@ -736,7 +703,7 @@ function tleToFC(txt){
 
 /* ---------------- Hazard / Environment ---------------- */
 defLayer({
-  id:'eonet', label:'Natural events (NASA)', color:'#ff8a3d', group:'hazard', refresh:600, colored:true, bg:true,
+  id:'eonet', label:'Natural events (NASA)', color:'#ff8a3d', group:'hazard', refresh:600, colored:true, defaultOff:true, bg:true,
   icon:'ico-fire', iconProp:true, iconSize:0.5,
   loader: async ()=>{
     // NASA EONET v3 — live wildfires, severe storms, volcanoes, ice…  ACAO:*
@@ -771,7 +738,7 @@ defLayer({
 
 
 defLayer({
-  id:'volcano', label:'Holocene volcanoes', color:'#ff8a5c', group:'hazard', refresh:0, icon:'ico-volcano', iconSize:0.44,
+  id:'volcano', label:'Holocene volcanoes', color:'#ff8a5c', group:'hazard', refresh:0, defaultOff:true, icon:'ico-volcano', iconSize:0.44,
   // Smithsonian GVP's web service is 403/CORS-blocked in browsers, so per the
   // spec's "(static)" tag this is a curated Holocene subset — keyless, no fetch.
   loader: async ()=>({type:'FeatureCollection',features:VOLCANOES.map(v=>({
@@ -783,7 +750,7 @@ defLayer({
 });
 
 defLayer({
-  id:'gdacs', label:'Global disasters', color:'#ff6a3d', group:'hazard', refresh:1800, colored:true, bg:true,
+  id:'gdacs', label:'Global disasters', color:'#ff6a3d', group:'hazard', refresh:1800, colored:true, defaultOff:true, bg:true,
   // GDACS — UN/EC global disaster alerts: quakes, cyclones, floods, volcanoes,
   // droughts, wildfires; colour = alert level (green/orange/red). Keyless, CORS *.
   loader: async ()=>{
@@ -833,7 +800,7 @@ defLayer({
   // seismicity from EMSC — dots SIZED by magnitude and COLOURED by recency,
   // so a big fresh quake reads instantly. bg-loaded for SITREP anomalies.
   id:'emsc', label:'Earthquakes (live)', color:'#ff8a5c', group:'hazard', refresh:120,
-  bg:true, sized:true, colored:true,
+  defaultOff:true, bg:true, sized:true, colored:true,
   loader: async ()=>{
     const j=await getJSON('https://www.seismicportal.eu/fdsnws/event/1/query?limit=1000&format=json&minmag=2',{timeout:15000});
     const now=Date.now();
@@ -854,7 +821,7 @@ defLayer({
 });
 
 defLayer({
-  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:600, icon:'ico-water', iconSize:0.42,
+  id:'water', label:'River / flood gauges', color:'#38d0ff', group:'hazard', refresh:600, defaultOff:true, icon:'ico-water', iconSize:0.42,
   // USGS live stream gauges in the current view (gauge height, ft)
   loader: async ()=>{
     const b=gl.getBounds();
@@ -906,7 +873,7 @@ defLayer({
 defLayer({
   // SPACE WEATHER (map layer): live auroral oval — NOAA SWPC OVATION model,
   // 1° grid, cells kept where visible-aurora probability ≥ 40%. Keyless, CORS *.
-  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'hazard', refresh:300, colored:true,
+  id:'aurora', label:'Aurora forecast', color:'#4be08a', group:'hazard', refresh:300, colored:true, defaultOff:true,
   loader: async ()=>{
     const j=await getJSON('https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',{timeout:25000});
     const feats=[];
