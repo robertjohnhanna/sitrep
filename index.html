@@ -269,6 +269,11 @@
     .maplibregl-ctrl-bottom-right{bottom:calc(58px + var(--sa-b))}
     /* map is full-width on mobile; keep the button above the bottom nav */
     #loc-btn{right:calc(14px + var(--sa-r));bottom:calc(54px + var(--sa-b) + 14px)}
+    /* canifly's built-in "rotate to portrait" guard fires on a short (≤480px),
+       landscape-ish, touch viewport — which the embedded iframe looked like on a
+       phone (nearly square). Keep the iframe TALLER than 480px so that guard
+       never matches and canifly renders its app. */
+    #fly-pane{height:clamp(486px,64vh,640px)}
   }
   @media (max-width:520px){
     .badge{padding:3px 6px}
