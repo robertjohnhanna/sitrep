@@ -344,6 +344,11 @@ async function adsb(path){
 // Refetched on every map move and once a minute. A budget caps the cell count
 // so an extreme zoom-out samples rather than firing hundreds of requests.
 async function adsbViewport(){
+  // Too zoomed out to be useful — and fanning the whole globe into ~20 tile
+  // requests here is exactly what rate-limits the mirrors and makes the next
+  // (real, zoomed-in) fetch fail. Return empty until the view is regional; the
+  // planes load the moment you zoom/fly in. Deliberate empty, not an error.
+  if(gl.getZoom()<4) return {ac:[]};
   const b=gl.getBounds();
   const S=b.getSouth(),N=b.getNorth(),W=b.getWest(),E=b.getEast();
   const midLat=(N+S)/2;
@@ -360,14 +365,21 @@ async function adsbViewport(){
   const seen=new Set(), ac=[];
   const results=await Promise.allSettled(
     centers.map(([la,lo])=>adsb('/point/'+la.toFixed(3)+'/'+lo.toFixed(3)+'/250')));
+  let ok=0;
   results.forEach(r=>{
     if(r.status!=='fulfilled') return;
+    ok++;
     (r.value.ac||[]).forEach(a=>{
       const id=a.hex||a.r||(a.lat+','+a.lon);   // dedupe overlap between cells
       if(seen.has(id)) return; seen.add(id);
       ac.push(a);
     });
   });
+  // Critical: if EVERY cell request failed this is a network error, NOT "zero
+  // aircraft in view". Throwing makes the runtime keep the planes already on
+  // the map and retry shortly, instead of wiping them with an empty (but
+  // technically successful) update that then sits stale until the 60s refresh.
+  if(ok===0 && centers.length) throw new Error('all ADS-B cells failed');
   return {ac};
 }
 function acFeatures(j,kind){
@@ -952,6 +964,12 @@ function ensureMapLayer(cfg){
 
 async function runLayer(cfg){
   const st=LAYER_STATE[cfg.id];
+  // Generation token: every call bumps it, and a call only writes data/state if
+  // it's still the newest. Overlapping refreshes (pan + interval + resize) can
+  // finish out of order; without this a slow stale fetch could clobber a fresh
+  // one. The latest request always wins.
+  const myGen=++st.gen;
+  if(st.quickTimer){ clearTimeout(st.quickTimer); st.quickTimer=null; }
   const row=$('#row-'+cfg.id);
   const cntEl=row&&row.querySelector('.cnt');
   if(cntEl && !st.retrying) cntEl.innerHTML='<span class="spin"></span>';
@@ -960,26 +978,35 @@ async function runLayer(cfg){
   for(let attempt=0;attempt<3;attempt++){
     try{
       const fc=await cfg.loader();
+      if(myGen!==st.gen) return;               // superseded by a newer refresh — drop this result
       const src=gl.getSource('src-'+cfg.id);
       if(src) src.setData(fc);
       st.cnt=(fc.features||[]).length;
-      st.at=Date.now(); st.errored=false; st.retrying=false;
+      st.at=Date.now(); st.errored=false; st.retrying=false; st.fails=0;
       if(cntEl) cntEl.textContent=st.cnt;
       if(row) row.title=cfg.label+' · updated '+fmtTime(st.at);
       return;
     }catch(e){
       lastErr=e;
+      if(myGen!==st.gen) return;                // a newer refresh owns the layer now
       if(attempt<2){ st.retrying=true;
         if(cntEl) cntEl.innerHTML='<span class="spin" title="retry '+(attempt+1)+'…"></span>';
         await new Promise(r=>setTimeout(r,1200*Math.pow(3,attempt))); // 1.2s, 3.6s
+        if(myGen!==st.gen) return;
       }
     }
   }
-  // silent: keep whatever count we had, show a neutral dash, and keep
-  // retrying on the normal refresh cycle — no error text anywhere.
-  st.errored=true; st.retrying=false;
+  // Failed this cycle. NEVER wipe what's on the map — keep the existing features
+  // and count, show a neutral dash, and retry with a short bounded backoff
+  // (6→30s) instead of waiting a full refresh interval. This is what stops a
+  // transient hiccup from leaving planes (or any layer) blank for up to a minute.
+  st.errored=true; st.retrying=false; st.fails=(st.fails||0)+1;
   if(cntEl) cntEl.textContent=st.cnt||'–';
   console.warn('[layer '+cfg.id+']',lastErr&&lastErr.message);
+  if(st.on && !st.quickTimer){
+    const delay=Math.min(30000,6000*st.fails);
+    st.quickTimer=setTimeout(()=>{ st.quickTimer=null; if(st.on) runLayer(cfg); },delay);
+  }
 }
 
 function scheduleLayer(cfg){
@@ -995,7 +1022,8 @@ function buildLayerPanel(){
   const groups={air:'#grp-air',surface:'#grp-surface',space:'#grp-space',
     hazard:'#grp-hazard'};
   LAYERS.forEach(cfg=>{
-    LAYER_STATE[cfg.id]={cnt:0,timer:null,on:!cfg.defaultOff,started:!cfg.defaultOff};
+    LAYER_STATE[cfg.id]={cnt:0,timer:null,on:!cfg.defaultOff,started:!cfg.defaultOff,
+      gen:0,quickTimer:null,fails:0};
     ensureMapLayer(cfg);
     const row=el('div','layer'+(cfg.defaultOff?' off':''));
     row.id='row-'+cfg.id;
@@ -1189,12 +1217,15 @@ $('#loc-btn').addEventListener('click',centerOnMe);
 
 // Map padding keeps the geographic centre inside the open area between the
 // panels (desktop only; on mobile the panels are overlay sheets).
+let _pad=null;
 function setMapPadding(){
-  if(window.matchMedia('(max-width:900px)').matches){
-    gl.setPadding({top:0,right:0,bottom:0,left:0}); return;
-  }
-  // both docked side panels are 320px wide — keep map content centred between them
-  gl.setPadding({top:20,left:336,right:336,bottom:24});
+  // both docked side panels are 320px wide — keep map content centred between
+  // them (desktop); on mobile the panels are overlay sheets so no padding.
+  const p=window.matchMedia('(max-width:900px)').matches
+    ? {top:0,right:0,bottom:0,left:0}
+    : {top:20,left:336,right:336,bottom:24};
+  if(_pad&&_pad.top===p.top&&_pad.left===p.left&&_pad.right===p.right&&_pad.bottom===p.bottom) return;
+  _pad=p; gl.setPadding(p);   // only when it actually changed — avoids needless camera nudges
 }
 window.addEventListener('resize',()=>{ clearTimeout(window.__pad);
   window.__pad=setTimeout(setMapPadding,200); });
@@ -1202,6 +1233,7 @@ window.addEventListener('resize',()=>{ clearTimeout(window.__pad);
 function setUserFix(lat,lon,src,meta){
   const first=USER.lat==null;
   if(!first&&src==='ip'&&USER.src==='gps') return; // never downgrade gps -> ip
+  const pLat=USER.lat,pLon=USER.lon;
   USER.lat=lat; USER.lon=lon; USER.src=src;
   if(meta){USER.place=meta.place||'';USER.region=meta.region||'';
     USER.rc=meta.rc||'';USER.cc=meta.cc||'';}
@@ -1209,7 +1241,14 @@ function setUserFix(lat,lon,src,meta){
     const d=el('div'); d.id='user-dot';
     userMarker=new maplibregl.Marker({element:d}).setLngLat([lon,lat]).addTo(gl);
   } else userMarker.setLngLat([lon,lat]);
-  gl.flyTo({center:[lon,lat],zoom:src==='gps'?9.5:7.5,speed:1.5});
+  // One clean camera move. The first fix flies in from the world view; a later
+  // GPS refinement of the IP guess only gently recenters, and only if it moved
+  // us far — so the load isn't a stutter of two back-to-back zoom animations.
+  if(first){
+    gl.flyTo({center:[lon,lat],zoom:src==='gps'?10:8,speed:1.4,curve:1.3});
+  } else if(src==='gps'&&pLat!=null&&havKm(pLat,pLon,lat,lon)>25){
+    gl.easeTo({center:[lon,lat],duration:700});
+  }
   $('#sit-loc').textContent=(USER.place?USER.place+', ':'')+
     (USER.rc||USER.region||USER.cc||lat.toFixed(2)+', '+lon.toFixed(2))+
     ' · '+src.toUpperCase();
@@ -1457,17 +1496,26 @@ audio.addEventListener('error',()=>{
 // change — on every map move AND on every container resize. A resize (window,
 // panel, orientation, sheet) enlarges the view without a pan, so without this
 // the newly-revealed area kept its stale aircraft until the next 60s refresh.
-let moveDebounce=null, lastGeoC=null;
+let moveDebounce=null, lastGeoC=null, lastViewKey=null;
 function refreshViewport(withLabel){
   clearTimeout(moveDebounce);
   moveDebounce=setTimeout(()=>{
-    ['nearair','water'].forEach(id=>{
-      const st=LAYER_STATE[id];
-      if(st&&st.on&&st.started) runLayer(LAYERS.find(l=>l.id===id));
-    });
+    // Only refetch the viewport feeds when the visible area actually changed.
+    // Rounding to ~1km + 0.1 zoom collapses jitter (a resize with the same
+    // bounds, a tiny GPS ease) so we don't fire redundant ADS-B requests that
+    // just invite rate-limiting. SITREP still recomputes every time.
+    const b=gl.getBounds(),z=gl.getZoom();
+    const key=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(n=>n.toFixed(2)).join(',')+'@'+z.toFixed(1);
+    if(key!==lastViewKey){
+      lastViewKey=key;
+      ['nearair','water'].forEach(id=>{
+        const st=LAYER_STATE[id];
+        if(st&&st.on&&st.started) runLayer(LAYERS.find(l=>l.id===id));
+      });
+    }
     sitrepTick();
     if(withLabel) updateAreaLabel();
-  },500);
+  },450);
 }
 gl.on('moveend',()=>refreshViewport(true));
 // container resize doesn't reliably fire moveend, so refetch here too
