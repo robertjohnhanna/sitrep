@@ -59,7 +59,11 @@
     --inset:calc(max(var(--sa-t),var(--sa-b)) + 8px);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  /* 100dvh (dynamic viewport height) so the layout matches the actually-visible
+     area on mobile — the bottom nav lands on the real bottom instead of behind
+     the browser toolbar, and panels no longer bleed under it. 100% is the
+     fallback for browsers without dvh. */
+  html,body{margin:0;height:100%;height:100dvh;background:var(--bg);color:var(--ink);
     font-family:var(--mono);font-size:13px;overflow:hidden;
     overscroll-behavior:none;touch-action:manipulation}
   #map{position:absolute;inset:0}
@@ -163,7 +167,7 @@
     flex:0 0 auto}
   #utc-badge{flex:0 0 auto}
   #sit-head .loc{margin-left:auto;color:var(--ink);font-size:13px;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis;max-width:44%;text-align:right;flex:0 1 auto}
+    overflow:hidden;text-overflow:ellipsis;text-align:right;flex:1 1 auto;min-width:0}
   /* center-on-me: floating control at the bottom-right corner of the map
      (the open area sits just left of the 320px right panel) */
   #loc-btn{position:absolute;z-index:16;right:calc(334px + var(--sa-r));bottom:16px;
@@ -398,6 +402,20 @@ function nearView(srcId,b,lat,lon){
     const d=havKm(lat,lon,flat,flon); if(d<bd){bd=d;best={f,km:d};}});
   return best;
 }
+// Bounds of the map area actually VISIBLE between the docked side panels.
+// gl.getBounds() spans the whole canvas — including the 320px strips hidden
+// under the OBJECTS / SITREP panels — so it over-counts "in view" (SITREP said
+// 9 aircraft when only 6 sit between the panels). On mobile the panels are
+// overlay sheets, so the full canvas is the visible area.
+function viewBounds(){
+  const cv=gl.getCanvas();
+  const w=cv.clientWidth, h=cv.clientHeight;
+  let l=0,r=w;
+  if(!window.matchMedia('(max-width:1000px)').matches){ l=Math.min(320,w*0.4); r=w-Math.min(320,w*0.4); }
+  const bb=new maplibregl.LngLatBounds();
+  [[l,0],[r,0],[r,h],[l,h]].forEach(pt=>bb.extend(gl.unproject(pt)));
+  return bb;
+}
 // polygon feature -> a representative [lon,lat] (first vertex), for fly-to / bounds
 function polyPt(f){
   const g=f.geometry; if(!g) return null;
@@ -576,14 +594,14 @@ defLayer({
 });
 
 defLayer({
-  id:'mil', label:'Military aircraft', color:'#ffce4d', group:'air', refresh:60, defaultOff:true,
+  id:'mil', label:'Military aircraft', color:'#ffce4d', group:'air', refresh:60,
   icon:'ac-mil', rotate:true, iconSize:0.5,
   loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')}),
   popup:acPopup
 });
 
 defLayer({
-  id:'sos', label:'Emergency squawks', color:'#ff4455', group:'air', refresh:60, defaultOff:true, bg:true,
+  id:'sos', label:'Emergency squawks', color:'#ff4455', group:'air', refresh:60, bg:true,
   icon:'ac-sos', rotate:true, iconSize:0.6,
   loader: async ()=>{
     // 7700 = general emergency, 7600 = radio failure, 7500 = unlawful interference
@@ -1264,7 +1282,7 @@ let sitrepGen=0;
 async function sitrepTick(){
   // SITREP reflects the CURRENT MAP AREA (viewport bounds), not just the user.
   const myGen=++sitrepGen;
-  const c=gl.getCenter(), b=gl.getBounds();
+  const c=gl.getCenter(), b=viewBounds();   // only the area visible between the panels
   const lat=c.lat, lon=c.lng;
   const rows=[];
   const row=(cls,ic,l1,l2,act)=>rows.push(
@@ -1318,9 +1336,8 @@ async function sitrepTick(){
   t.classList.remove('warn','alert');
   if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
 
-  // -- global space weather conditions (always shown) --
-  row(KP!=null&&KP>=5?'alert':'','🛰','SPACE WEATHER',
-    'Kp '+(KP!=null?KP:'–')+' · SOLAR '+(XRAY||'–'));
+  // (space weather is surfaced only when it's amber/red — via the geomagnetic
+  //  storm / solar flare anomaly rows above; no always-on conditions line.)
 
   // -- everything else scoped to the map area (nearest-in-view) --
   const acN=countView('src-nearair',b);
