@@ -1160,25 +1160,52 @@ async function loadXray(){
     XRAY=(f&&(f.current_class||f.max_class))||null;
   }catch(e){ XRAY=null; }
 }
-// WORLD NEWS — Wikipedia's "In the news" (ITN): the only keyless, CORS-* feed
-// that's curated to MAJOR global events only (editor-vetted, a handful a day).
-// No map layer — it just feeds a WORLD section in the SITREP. Today's feed, or
-// yesterday's if today isn't published yet.
-let WORLD_NEWS=[]; // [{text,url}]
+// WORLD NEWS — Wikipedia "Current events" portal, keyless + CORS-*. We pull the
+// daily page's wikitext and keep ONLY the "Armed conflicts and attacks" and
+// "Disasters and accidents" sections (editor-categorised, so no sports/culture
+// keyword-guessing). No map layer — it just feeds a WORLD section in the SITREP.
+const NEWS_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const NEWS_SECTIONS={'Armed conflicts and attacks':'⚔️','Disasters and accidents':'🌊'};
+let WORLD_NEWS=[]; // [{text,url,icon}]
+function parseCurrentEvents(wt){
+  const m=wt.match(/\|\s*content\s*=([\s\S]*)/);
+  const body=(m?m[1]:wt).split(/\r?\n/);
+  let icon=null; const out=[];
+  for(const raw of body){
+    const line=raw.trim();
+    if(!line) continue;
+    const h=line.match(/^'''(.+?)'''$/);            // section header, e.g. '''Disasters and accidents'''
+    if(h){ icon=NEWS_SECTIONS[h[1].trim()]||null; continue; }
+    if(!icon || !/^\*+/.test(line)) continue;        // only inside a wanted section, bullet lines
+    if(!/\[https?:\/\//.test(line)) continue;        // leaf lines carry a source link = an actual event
+    const um=line.match(/\[(https?:\/\/[^\s\]]+)/);   // first external source URL → OPEN target
+    let t=line.replace(/\[https?:\/\/[^\]]*\]/g,'')   // drop [url (Source)] citations
+      .replace(/\[\[[^\]|]*\|([^\]]+)\]\]/g,'$1')     // [[a|b]] → b
+      .replace(/\[\[([^\]]+)\]\]/g,'$1')              // [[a]]  → a
+      .replace(/'''?/g,'').replace(/\{\{[^}]*\}\}/g,'').replace(/<[^>]+>/g,'')
+      .replace(/^\*+\s*/,'').replace(/\s+/g,' ').trim();
+    if(t.length>10) out.push({text:t,url:um?um[1]:'',icon});
+  }
+  return out;
+}
 async function loadWorldNews(){
   const now=new Date();
-  for(let back=0;back<2;back++){
+  for(let back=0;back<3;back++){
     const d=new Date(now.getTime()-back*864e5);
-    const ymd=d.getUTCFullYear()+'/'+String(d.getUTCMonth()+1).padStart(2,'0')+'/'+String(d.getUTCDate()).padStart(2,'0');
+    const page='Portal:Current events/'+d.getUTCFullYear()+' '+NEWS_MONTHS[d.getUTCMonth()]+' '+d.getUTCDate();
     try{
-      const j=await getJSON('https://en.wikipedia.org/api/rest_v1/feed/featured/'+ymd,{timeout:12000});
-      const items=(j.news||[]).map(n=>{
-        const text=String(n.story||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
-        const lead=(n.links||[]).find(l=>l&&l.content_urls)||{};
-        const url=lead.content_urls&&lead.content_urls.desktop?lead.content_urls.desktop.page:'';
-        return {text,url};
-      }).filter(x=>x.text);
-      if(items.length){ WORLD_NEWS=items.slice(0,6); return; }
+      const j=await getJSON('https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&origin=*&page='+encodeURIComponent(page),{timeout:12000});
+      const wt=j&&j.parse&&j.parse.wikitext&&j.parse.wikitext['*'];
+      if(!wt) continue;
+      const items=parseCurrentEvents(wt);
+      if(items.length){
+        // balance the two categories so disasters aren't crowded out by a
+        // conflict-heavy day (up to 4 each, conflicts first)
+        const war=items.filter(x=>x.icon==='⚔️').slice(0,4);
+        const dis=items.filter(x=>x.icon==='🌊').slice(0,4);
+        WORLD_NEWS=war.concat(dis);
+        return;
+      }
     }catch(e){}
   }
 }
@@ -1378,10 +1405,10 @@ async function sitrepTick(){
   if(nd&&!gRed.includes(nd.f)) row('','🌀',(nd.f.properties.type||'DISASTER').toUpperCase()+' · '+fmtMi(nd.km),
     escapeHtml(String(nd.f.properties.name||'').slice(0,56)),flyBtn(nd.f));
 
-  // -- WORLD NEWS (major global events, not map-scoped) — Wikipedia ITN --
+  // -- WORLD NEWS: conflict + disaster events (not map-scoped) — Wikipedia --
   if(WORLD_NEWS.length){
     rows.push('<div class="sit-div"></div>');
-    WORLD_NEWS.forEach(n=>row('','📰',escapeHtml(n.text.slice(0,120)),'',
+    WORLD_NEWS.forEach(n=>row('',n.icon||'📰',escapeHtml(n.text.slice(0,150)),'',
       n.url?`<button class="act" data-act="open" data-url="${escapeHtml(n.url)}">OPEN</button>`:''));
   }
 
