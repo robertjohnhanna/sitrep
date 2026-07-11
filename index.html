@@ -136,16 +136,21 @@
   /* ---------- popups ---------- */
   .maplibregl-popup-content{background:var(--panel);color:var(--ink);
     border:1px solid var(--line);border-radius:10px;font-family:var(--mono);
-    box-shadow:0 10px 34px #000c;max-width:300px;padding:12px 14px}
+    box-shadow:0 10px 34px #000c;max-width:300px;padding:12px 14px;
+    overflow-wrap:anywhere;word-break:break-word}
   .maplibregl-popup-close-button{color:var(--ink-dim);font-size:18px;padding:2px 8px}
   .maplibregl-popup-anchor-bottom .maplibregl-popup-tip{border-top-color:#000}
   .maplibregl-popup-anchor-top .maplibregl-popup-tip{border-bottom-color:#000}
-  .pop h4{margin:0 0 6px;color:var(--accent);font-size:13px}
-  .pop .kv{display:flex;gap:6px;font-size:13px;margin:2px 0}
-  .pop .kv span{color:var(--ink-dim);min-width:66px;flex:0 0 auto}
+  .pop h4{margin:0 0 6px;color:var(--accent);font-size:13px;overflow-wrap:anywhere}
+  /* kv is a block, not flex: the label is a fixed-width inline-block and the
+     value flows as inline text that WRAPS (long place names / areas no longer
+     overflow the box). :first-child keeps unit .u spans out of the label rule. */
+  .pop .kv{font-size:13px;margin:2px 0;overflow-wrap:anywhere}
+  .pop .kv>span:first-child{color:var(--ink-dim);display:inline-block;
+    min-width:66px;margin-right:6px;vertical-align:top}
   .pop .sub{font-size:13px;color:var(--ink);line-height:1.45;margin-top:6px;
-    max-height:120px;overflow:auto}
-  .pop .lnk{margin-top:7px;font-size:13px}
+    max-height:120px;overflow:auto;overflow-wrap:anywhere}
+  .pop .lnk{margin-top:7px;font-size:13px;overflow-wrap:anywhere}
 
   /* ---------- list modal (aircraft in view, etc.) ---------- */
   #modal{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
@@ -583,6 +588,34 @@ const gl = new maplibregl.Map({
 // left-panel footer so nothing overlaps the panels.
 try{ gl.setProjection && gl.setProjection({type:'globe'}); }catch(e){/* flat fallback */}
 window.__sitrep={map:gl}; // debug/test handle
+
+// Zoom is a SEPARATE action from panning. MapLibre's built-in scroll and
+// double-click zoom anchor to the CURSOR, which slides the map sideways as you
+// zoom. We disable those and re-implement zoom around the map CENTRE, so the
+// map never drifts while zooming — pan (drag) stays the only way to move it.
+// (Touch pinch is left alone: anchoring to the fingers is the natural mobile
+// gesture.)
+gl.scrollZoom.disable();
+gl.doubleClickZoom.disable();
+(function centerZoom(){
+  const cvs=gl.getCanvasContainer();
+  const clamp=z=>Math.max(gl.getMinZoom(),Math.min(gl.getMaxZoom(),z));
+  let target=gl.getZoom(), last=-1e9;
+  cvs.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const now=e.timeStamp;
+    if(now-last>250) target=gl.getZoom();   // idle gap: resync to the live zoom
+    last=now;
+    let d=e.deltaY;
+    if(e.deltaMode===1) d*=16; else if(e.deltaMode===2) d*=400;   // line / page → px
+    target=clamp(target - d*0.004);
+    gl.easeTo({zoom:target,around:gl.getCenter(),duration:130,easing:t=>t});
+  },{passive:false});
+  cvs.addEventListener('dblclick',e=>{
+    e.preventDefault();
+    gl.easeTo({zoom:clamp(gl.getZoom()+(e.shiftKey?-1:1)),around:gl.getCenter(),duration:250});
+  });
+})();
 
 /* =====================================================================
    ICONS — rasterised to canvas and registered with map.addImage().
@@ -1461,11 +1494,12 @@ async function locate(){
   }
   if(USER.lat==null) $('#sit-loc').textContent='no fix — tap ⌖ on the map';
 }
-// "center on me": pan to the fix at the CURRENT zoom (no zoom change); if none
-// yet, kick off IP + GPS location and prompt for precise GPS.
+// "center on me": pan to the fix and reset the view to north-up, flat (bearing
+// and pitch back to 0) — but keep the CURRENT zoom. If no fix yet, kick off IP +
+// GPS location and prompt for precise GPS.
 function centerOnMe(){
   if(USER.lat!=null){
-    gl.easeTo({center:[USER.lon,USER.lat],duration:800});
+    gl.easeTo({center:[USER.lon,USER.lat],bearing:0,pitch:0,duration:800});
   } else {
     toast('LOCATING…','');
     locate();
