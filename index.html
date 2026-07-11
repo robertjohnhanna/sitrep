@@ -25,8 +25,9 @@
 
      Map layers (all keyless, CORS-*): live aircraft (adsb), NWS
      warnings, NEXRAD radar (Iowa State Mesonet), FAA airspace (Class
-     B/C/D rings around airports + national-defense no-fly zones), plus a
-     dashed range ring at the crosshair matching the canifly RANGE setting. SITREP-only
+     B/C/D + special-use / prohibited / security / stadium restrictions),
+     National Park Service lands, plus a dashed range ring at the crosshair
+     matching the canifly RANGE setting. SITREP-only
      feeds: SPC Day-1 outlook, NOAA SWPC space weather (Kp / GOES X-ray).
      All sources are keyless with ACAO:* so fetch works cross-origin;
      anything requiring a key is excluded by the keyless rule.
@@ -528,14 +529,18 @@ const gl = new maplibregl.Map({
 try{ gl.setProjection && gl.setProjection({type:'globe'}); }catch(e){/* flat fallback */}
 window.__sitrep={map:gl}; // debug/test handle
 
-// Zoom is a SEPARATE action from panning. MapLibre's built-in scroll and
-// double-click zoom anchor to the CURSOR, which slides the map sideways as you
-// zoom. We disable those and re-implement zoom around the map CENTRE, so the
-// map never drifts while zooming — pan (drag) stays the only way to move it.
-// (Touch pinch is left alone: anchoring to the fingers is the natural mobile
-// gesture.)
+// Zoom is a SEPARATE action from panning. MapLibre's built-in scroll, double-
+// click AND pinch zoom all anchor to the CURSOR/fingers, which slides the map
+// sideways (and pinch can rotate/tilt) as you zoom. We disable all of them and
+// re-implement zoom around the map CENTRE — on desktop via the wheel, on touch
+// via a custom two-finger pinch (below) — so zooming never drifts the lat/lon or
+// tilts the north-up, crosshair-centric view. One-finger DRAG stays the only way
+// to pan. Minimalist and predictable: pinch = zoom, drag = move, nothing else.
 gl.scrollZoom.disable();
 gl.doubleClickZoom.disable();
+gl.touchZoomRotate.disable();   // replaced by the centre-anchored pinch below
+gl.touchPitch.disable();        // no tilt — the view stays flat / north-up
+gl.dragRotate.disable();        // no rotate (desktop right-drag)
 // Programmatic camera moves (ME button, fly-to, fitBounds) must CANCEL the
 // wheel-zoom loop below first — its per-frame setZoom would abort their
 // easeTo/flyTo mid-animation if the user had just scroll-zoomed.
@@ -572,6 +577,38 @@ let cancelCenterZoom=()=>{};
     target=clamp((running?target:gl.getZoom())+(e.shiftKey?-1:1));
     kick();
   });
+  // ---- Touch devices: fully custom, minimalist navigation. We disable
+  //      MapLibre's own touch pan (dragPan) here and drive BOTH gestures
+  //      ourselves — ONE finger pans, TWO fingers zoom around the map CENTRE
+  //      (never a pan, never a rotate/tilt). Driving both keeps them cleanly
+  //      separate, so the lat/lon can't drift while you pinch; and doing it only
+  //      on a coarse pointer leaves the desktop mouse-drag pan + wheel zoom
+  //      untouched (dragPan handles the mouse too). ----
+  if(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches){
+    gl.dragPan.disable();
+    let mode=0, px=0, py=0, pd=0, pz=0;   // mode: 0 idle · 1 pan · 2 pinch
+    const d2=t=>Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+    cvs.addEventListener('touchstart',e=>{
+      if(e.touches.length>=2){ mode=2; pd=d2(e.touches); pz=gl.getZoom(); target=pz; e.preventDefault(); }
+      else if(e.touches.length===1){ mode=1; px=e.touches[0].clientX; py=e.touches[0].clientY; }
+    },{passive:false});
+    cvs.addEventListener('touchmove',e=>{
+      if(mode===2&&e.touches.length>=2){
+        const d=d2(e.touches);
+        if(pd>0&&d>0){ target=clamp(pz+Math.log2(d/pd)); kick(); }   // zoom around centre
+        e.preventDefault();
+      }else if(mode===1&&e.touches.length===1){
+        const t=e.touches[0], dx=t.clientX-px, dy=t.clientY-py; px=t.clientX; py=t.clientY;
+        if(dx||dy){ cancelCenterZoom(); gl.panBy([-dx,-dy],{animate:false}); }   // content follows the finger
+        e.preventDefault();
+      }
+    },{passive:false});
+    cvs.addEventListener('touchend',e=>{
+      if(e.touches.length===0) mode=0;
+      else if(e.touches.length===1){ mode=1; px=e.touches[0].clientX; py=e.touches[0].clientY; }   // pinch → single-finger pan
+    });
+    cvs.addEventListener('touchcancel',()=>{ mode=0; });
+  }
 })();
 
 /* =====================================================================
@@ -789,6 +826,39 @@ defLayer({
       +(hasAlt?`<div class="kv"><span>alt</span>${escapeHtml(String(p.lo||'sfc'))} – ${escapeHtml(String(p.hi||'—'))}</div>`:'')
       +`<div class="kv"><span>src</span>FAA · ${note}</div>`;
   }
+});
+
+defLayer({
+  // NATIONAL PARK SERVICE lands — every NPS unit (parks, monuments, seashores,
+  // recreation areas…). NPS policy prohibits launching, landing, or operating a
+  // drone from within a unit's boundary, so for a preflight this is a hard
+  // no-fly. Drawn LIGHTLY in park green. Keyless NPS ArcGIS boundary service,
+  // CORS *. Viewport-scoped + zoom-gated; geometry generalised per zoom so a big
+  // park doesn't ship a huge polygon. Sunk beneath the aircraft at boot.
+  id:'nps', label:'National Park Service lands', color:'#3fa46a', group:'air', refresh:1800,
+  viewport:true, geom:'fill', colored:true, fillOpacity:0.06, lineWidth:1, lineOpacity:0.3,
+  loader: async ()=>{
+    if(gl.getZoom()<7) return {type:'FeatureCollection',features:[]};   // too wide → skip
+    const b=viewBounds();
+    const env=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(n=>n.toFixed(3)).join(',');
+    // generalise geometry to ~2 px at the current zoom so large park boundaries
+    // stay light on the wire without visibly changing shape
+    const off=Math.max(0.0001, 360/(Math.pow(2,gl.getZoom())*256)*2);
+    const url='https://services1.arcgis.com/fBc8EJBxQRMcHlei/ArcGIS/rest/services/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2/query'
+      +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
+      +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&maxAllowableOffset=${off.toFixed(5)}`
+      +'&outFields=UNIT_NAME,UNIT_TYPE&f=geojson';
+    const j=await getJSON(url,{timeout:15000});
+    const feats=[];
+    (j.features||[]).forEach(f=>{ if(!f.geometry) return; const p=f.properties||{};
+      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'nps',
+        name:p.UNIT_NAME||'',utype:p.UNIT_TYPE||'',_col:'#3fa46a'}}); });
+    return {type:'FeatureCollection',features:feats};
+  },
+  popup:p=>`<h4 style="color:#3fa46a">🌲 ${escapeHtml(String(p.name||'NPS LAND').toUpperCase())}</h4>
+    <div class="kv"><span>type</span>${escapeHtml(String(p.utype||'NPS unit'))}</div>
+    <div class="kv"><span>drone</span>launch / land / operate prohibited</div>
+    <div class="kv"><span>src</span>National Park Service</div>`
 });
 
 /* =====================================================================
@@ -1345,6 +1415,10 @@ async function sitrepTick(){
     general.push([p.sev==='hard'?'danger':'alert', p.sev==='hard'?'⛔':'⚠',
       AT[p.cls]||'AIRSPACE', cut(p.name||'—',22), sub, '', true]);
   });
+  // NATIONAL PARK SERVICE land under the crosshair — a hard drone no-fly.
+  const npsHit=featsIn('src-nps').find(f=>pointInFeature(f,lon,lat));
+  if(npsHit) general.push(['danger','🌲', cut(npsHit.properties.name||'NPS LAND',20),
+    'drones prohibited', cut(npsHit.properties.utype||'NPS unit',24), '', true]);
 
   // -- INDIVIDUAL item cards: one per in-view feature (planes, warnings,
   //    emergencies), all interleaved. HAZARDS OUTRANK ROUTINE TRAFFIC: a
@@ -1714,6 +1788,11 @@ function flyRestriction(){
     if(hit||p.sev!=='hard'||p.cls==='DEF') return;
     if(pointInFeature(f,c.lng,c.lat)) hit={code:p.code,name:p.name};
   });
+  // NPS land is a hard no-fly too (can't launch/operate there)
+  if(!hit) featsIn('src-nps').forEach(f=>{
+    if(hit) return;
+    if(pointInFeature(f,c.lng,c.lat)) hit={code:'PARK',name:f.properties.name};
+  });
   return hit;
 }
 
@@ -1817,6 +1896,7 @@ function flyInfoHtml(){
   const w=k=>FLY.err[k]?' warn':'';
   const wac=['nearair','mil','sos'].some(id=>LAYER_STATE[id]&&LAYER_STATE[id].errored)?' warn':'';
   const wasp=LAYER_STATE.airspace&&LAYER_STATE.airspace.errored?' warn':'';
+  const wnps=LAYER_STATE.nps&&LAYER_STATE.nps.errored?' warn':'';
   return `<div class="infobox" role="region" aria-label="Limits and data sources"><div class="iwrap">`
     +`<div class="ihead">Ceiling values</div>`
     +`<div class="irow"><span class="ic">faa</span><span class="id${w('asp')}">laanc &middot; defense &middot; ${SPEC.regFt} ft</span></div>`
@@ -1830,6 +1910,7 @@ function flyInfoHtml(){
     +`<div class="irow"><span class="ic">kp</span><span class="id${w('kp')}">&ge; ${SPEC.kpMax}</span></div>`
     +`<div class="irow"><span class="ic">proh</span><span class="id${wasp}">prohibited area overhead</span></div>`
     +`<div class="irow"><span class="ic">nsuf</span><span class="id${wasp}">security uas zone overhead</span></div>`
+    +`<div class="irow"><span class="ic">park</span><span class="id${wnps}">national park land</span></div>`
     +`<div class="ihead">Data values</div>`
     +`<div class="irow"><a class="isrc" href="${faaUrl}" target="_blank" rel="noopener">faa</a><span class="id${w('asp')}">airspace</span></div>`
     +`<div class="irow"><a class="isrc" href="${omUrl}" target="_blank" rel="noopener">open-meteo</a><span class="id${w('om')}">wind &middot; vis &middot; sky</span></div>`
@@ -1837,6 +1918,7 @@ function flyInfoHtml(){
     +`<div class="irow"><a class="isrc" href="https://mesonet.agron.iastate.edu/GIS/" target="_blank" rel="noopener">nexrad</a><span class="id${w('radar')}">pcpn radar</span></div>`
     +`<div class="irow"><a class="isrc" href="https://airplanes.live/" target="_blank" rel="noopener">ads-b</a><span class="id${wac}">trfc aircraft</span></div>`
     +`<div class="irow"><a class="isrc" href="${faaUrl}" target="_blank" rel="noopener">faa sua</a><span class="id${wasp}">restrictions overlay</span></div>`
+    +`<div class="irow"><a class="isrc" href="https://www.nps.gov/" target="_blank" rel="noopener">nps</a><span class="id${wnps}">park boundaries</span></div>`
     +`</div></div>`;
 }
 // The settings box — max wind + range — rendered into its own #fly-settings box
@@ -2013,9 +2095,9 @@ gl.on('move',scheduleRing);
 gl.on('load',()=>{
   registerIcons();
   initLayers();
-  // FAA controlled airspace is background context — sink its fill + outline
+  // FAA airspace + NPS lands are background context — sink their fills + outlines
   // beneath the aircraft icons so planes and warnings always read on top.
-  ['ly-airspace','lyl-airspace'].forEach(id=>{ if(gl.getLayer(id)&&gl.getLayer('ly-nearair')) gl.moveLayer(id,'ly-nearair'); });
+  ['ly-nps','lyl-nps','ly-airspace','lyl-airspace'].forEach(id=>{ if(gl.getLayer(id)&&gl.getLayer('ly-nearair')) gl.moveLayer(id,'ly-nearair'); });
   // range ring — a dashed accent circle tracking the crosshair at RNG.mi, added
   // last so it sits on top of the map layers (under the HTML crosshair overlay)
   gl.addSource('src-ring',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
