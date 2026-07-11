@@ -379,7 +379,13 @@ function celestrakGet(url,opts={}){
   _ctChain=p.catch(()=>{});   // keep the queue moving even if one request fails
   return p;
 }
-const fmtTime = ts => new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+// All times shown in the user's LOCAL time — the timezone detected for their
+// location (USER.tz, from IP geolocation), falling back to the browser's zone.
+const tzOpt = () => USER.tz ? {timeZone:USER.tz} : {};
+const fmtTime = ts => new Date(ts).toLocaleTimeString([], Object.assign({hour:'2-digit',minute:'2-digit',second:'2-digit'}, tzOpt()));
+const fmtDateTime = iso => { const d=new Date(iso); return isNaN(d.getTime())
+  ? String(iso).slice(0,16).replace('T',' ')
+  : d.toLocaleString([], Object.assign({month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}, tzOpt())); };
 // great-circle distance, km
 function havKm(lat1,lon1,lat2,lon2){
   const R=6371,d=Math.PI/180;
@@ -693,7 +699,7 @@ const GDACS_ICON={EQ:'ico-quake',TC:'ico-cyclone',FL:'ico-flood',VO:'ico-volcano
 const LAYERS=[];
 const defLayer=c=>LAYERS.push(c);
 // user position state — filled by IP geolocation instantly, refined by GPS
-const USER={lat:null,lon:null,place:'',region:'',cc:'',src:null};
+const USER={lat:null,lon:null,place:'',region:'',cc:'',src:null,tz:''};
 
 /* ---------------- Movement ---------------- */
 defLayer({
@@ -864,7 +870,7 @@ defLayer({
   popup:p=>`<h4>🌍 ${escapeHtml(p.title)}</h4>
     <div class="kv"><span>category</span>${escapeHtml(p.cat)}</div>
     ${p.mag?`<div class="kv"><span>magnitude</span>${escapeHtml(p.mag)}</div>`:''}
-    ${p.date?`<div class="kv"><span>updated</span>${escapeHtml(String(p.date).slice(0,16).replace('T',' '))}</div>`:''}
+    ${p.date?`<div class="kv"><span>updated</span>${escapeHtml(fmtDateTime(p.date))}</div>`:''}
     <div class="kv"><span>src</span>NASA EONET</div>
     ${p.link?`<div class="lnk"><a target="_blank" rel="noopener" href="${escapeHtml(p.link)}">source ↗</a></div>`:''}`
 });
@@ -924,7 +930,7 @@ defLayer({
   },
   popup:p=>`<h4>🚀 ${escapeHtml(p.name)}</h4>
     ${p.prov?`<div class="kv"><span>provider</span>${escapeHtml(p.prov)}</div>`:''}
-    <div class="kv"><span>T-0 (UTC)</span>${escapeHtml(String(p.net).slice(0,16).replace('T',' '))}</div>
+    <div class="kv"><span>T-0</span>${escapeHtml(fmtDateTime(p.net))}</div>
     <div class="kv"><span>pad</span>${escapeHtml(p.pad)}</div>
     <div class="kv"><span>status</span>${escapeHtml(p.status)}</div>`
 });
@@ -1421,7 +1427,8 @@ async function locate(){
     const j=await getJSON('https://ipwho.is/',{timeout:9000});
     if(j&&j.success!==false&&j.latitude!=null)
       setUserFix(j.latitude,j.longitude,'ip',
-        {place:j.city,region:j.region,rc:j.region_code,cc:j.country_code});
+        {place:j.city,region:j.region,rc:j.region_code,cc:j.country_code,
+         tz:(j.timezone&&j.timezone.id)||''});
   }catch(e){ console.warn('[ip-locate]',e.message); }
   if(navigator.geolocation){
     try{
@@ -1468,7 +1475,7 @@ function setUserFix(lat,lon,src,meta){
   const pLat=USER.lat,pLon=USER.lon;
   USER.lat=lat; USER.lon=lon; USER.src=src;
   if(meta){USER.place=meta.place||'';USER.region=meta.region||'';
-    USER.rc=meta.rc||'';USER.cc=meta.cc||'';}
+    USER.rc=meta.rc||'';USER.cc=meta.cc||'';USER.tz=meta.tz||USER.tz;}
   if(!userMarker){
     const d=el('div'); d.id='user-dot';
     userMarker=new maplibregl.Marker({element:d}).setLngLat([lon,lat]).addTo(gl);
