@@ -94,7 +94,7 @@
      a SIZE CONTAINER, so every font and pad below is in cq units and the chart
      scales itself to whatever box it gets — desktop dock, iPad, iPhone sheet. */
   #fly-pane{flex:0 0 50%;min-height:0;border-top:1px solid var(--line);background:#000;
-    container-type:size;--fti:min(2.4cqh,3.3cqw,14px);
+    container-type:size;--fti:min(2.4cqh,3.3cqw,12px);
     /* a bottom-anchored column: the chart (flip box) then the settings box, both
        hugging the foot of the panel; any slack falls as blank space ABOVE the
        chart, between it and the SITREP cards */
@@ -110,10 +110,10 @@
     align-content:center;font-variant-numeric:tabular-nums}
   #fly-pane .grow{display:contents}
   #fly-pane .ga,#fly-pane .gc{display:flex;align-items:center;min-width:0;white-space:nowrap;
-    padding:min(1.3cqh,2cqw,11px) min(.6cqh,.9cqw,6px);line-height:1}
+    padding:min(1.3cqh,2cqw,5px) min(.6cqh,.9cqw,6px);line-height:1}
   #fly-pane .ga{justify-content:flex-start;color:var(--ink);letter-spacing:.03em;
-    font-size:min(2.6cqh,3.6cqw,15px)}
-  #fly-pane .gc{justify-content:center;font-weight:700;font-size:min(3.5cqh,4.6cqw,21px);
+    font-size:min(2.6cqh,3.6cqw,12px)}
+  #fly-pane .gc{justify-content:center;font-weight:700;font-size:min(3.5cqh,4.6cqw,15px);
     color:var(--ink);border-left:1px solid #16212b}   /* faint rule between time columns */
   /* reference-unit tags (FT on the 400 label, MPH on the gust row's last cell) */
   #fly-pane .gu{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
@@ -123,17 +123,17 @@
   #fly-pane .ga.bad{color:var(--danger)}
   #fly-pane .ghead .gc.bad{background:none;color:var(--danger)}
   #fly-pane .ghead .ga,#fly-pane .ghead .gc{border-bottom:1px solid var(--line);
-    padding-bottom:min(.8cqh,1.2cqw);font-weight:500;font-size:min(2.6cqh,3.6cqw,15px);color:var(--ink)}
+    padding-bottom:min(.8cqh,1.2cqw);font-weight:500;font-size:min(2.6cqh,3.6cqw,12px);color:var(--ink)}
   #fly-pane .ghead .gc{border-left:0}
   #fly-pane .ghead .gc.now{font-weight:700}
   #fly-pane .ga.hi{font-weight:700}
   #fly-pane .ggust .ga,#fly-pane .ggust .gc{border-top:1px solid rgba(116,133,150,.4)}
   /* a cap/gate code cell (GUST/VIS/SKY/WIND/FAA/TRFC/PCPN/KPx) */
-  #fly-pane .gc.rsn{font-size:min(2.5cqh,3.4cqw,15px);font-weight:800;letter-spacing:.03em}
+  #fly-pane .gc.rsn{font-size:min(2.5cqh,3.4cqw,13px);font-weight:800;letter-spacing:.03em}
   /* loading shimmer — exactly one cell-text line tall, so nothing shifts on load */
   @keyframes flypulse{0%,100%{opacity:1}50%{opacity:.2}}
   #fly-pane .sk{display:block;border-radius:4px;background:var(--ink-dim);opacity:.22;
-    width:58%;height:min(3.5cqh,4.6cqw,21px);margin:0 auto;animation:flypulse 1.6s ease-in-out infinite}
+    width:58%;height:min(3.5cqh,4.6cqw,15px);margin:0 auto;animation:flypulse 1.6s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){#fly-pane .sk{animation:none}}
   /* the flip info card: the gate/cap codes and the data sources (the settings
      now live in their own box below the chart, not on this flip face) */
@@ -730,45 +730,65 @@ defLayer({
   // Viewport-scoped and zoom-gated so a wide view doesn't pull the country.
   // This is a VISUAL layer only — the canifly gate still runs its own strict
   // point-buffer query, so a soft-failing overlay never understates a no-fly.
-  id:'airspace', label:'FAA airspace (controlled + defense)', color:'#5b8def', group:'air', refresh:900,
+  id:'airspace', label:'FAA airspace + restrictions', color:'#5b8def', group:'air', refresh:900,
   viewport:true, geom:'fill', colored:true, fillOpacity:0.05,
   lineWidth:1, lineOpacity:0.34,
   loader: async ()=>{
     if(gl.getZoom()<7) return {type:'FeatureCollection',features:[]};   // too wide → skip
     const b=viewBounds();
     const env=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(n=>n.toFixed(3)).join(',');
-    const q=svc=>`https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/${svc}/FeatureServer/0/query`
+    const q=(svc,fields)=>`https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/${svc}/FeatureServer/0/query`
       +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
-      +'&spatialRel=esriSpatialRelIntersects&returnGeometry=true&f=geojson';
-    const [cls,def]=await Promise.all([
-      getJSON(q('Class_Airspace')+'&outFields=NAME,CLASS,LOCAL_TYPE',{timeout:15000}).catch(()=>null),
-      getJSON(q('National_Defense_Airspace_TFR_Areas')+'&outFields=NAME',{timeout:15000}).catch(()=>null)]);
-    const COL={B:'#5b8def',C:'#c06ad0',D:'#5b8def'};
+      +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&outFields=${fields}&f=geojson`;
+    // five keyless CORS feeds from the FAA org, each fail-soft (a soft failure just
+    // omits its features — the canifly gate still runs its own strict query)
+    const [cls,def,sua,nsufr,stad]=await Promise.all([
+      getJSON(q('Class_Airspace','NAME,CLASS,LOCAL_TYPE'),{timeout:15000}).catch(()=>null),
+      getJSON(q('National_Defense_Airspace_TFR_Areas','NAME'),{timeout:15000}).catch(()=>null),
+      getJSON(q('Special_Use_Airspace','NAME,TYPE_CODE,UPPER_VAL,LOWER_VAL'),{timeout:15000}).catch(()=>null),
+      getJSON(q('Part_Time_National_Security_UAS_Flight_Restrictions','Facility,Floor,Ceiling'),{timeout:15000}).catch(()=>null),
+      getJSON(q('Stadiums','NAME'),{timeout:15000}).catch(()=>null)]);
     const feats=[];
-    ((cls&&cls.features)||[]).forEach(f=>{
-      const p=f.properties||{}, cl=p.CLASS;
-      // airport controlled airspace only: B/C/D + the surface Class E (E2) that
-      // caps a non-towered field — skip Class A (all of CONUS) and the big E
-      // transition areas (E3/E4/E5), which are clutter, not airport rings
-      const keep=/^[BCD]$/.test(cl)||p.LOCAL_TYPE==='CLASS_E2';
-      if(!keep||!f.geometry) return;
-      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'airspace',
-        cls:cl,name:p.NAME||'',_col:COL[cl]||'#c06ad0'}});
-    });
-    ((def&&def.features)||[]).forEach(f=>{
-      if(!f.geometry) return;
-      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'airspace',
-        cls:'DEF',name:(f.properties&&f.properties.NAME)||'',_col:'#ff5a3c'}});
-    });
+    const push=(geom,props)=>{ if(geom) feats.push({type:'Feature',geometry:geom,properties:props}); };
+    // controlled airspace around airports (advisory, aeronautical blue/magenta)
+    const CTRL={B:'#5b8def',C:'#c06ad0',D:'#5b8def'};
+    ((cls&&cls.features)||[]).forEach(f=>{ const p=f.properties||{},cl=p.CLASS;
+      if(!(/^[BCD]$/.test(cl)||p.LOCAL_TYPE==='CLASS_E2')||!f.geometry) return;
+      push(f.geometry,{_kind:'airspace',sev:'ctrl',cls:cl,code:cl,name:p.NAME||'',_col:CTRL[cl]||'#c06ad0'}); });
+    // national-defense TFR zones — hard no-fly (red)
+    ((def&&def.features)||[]).forEach(f=>push(f.geometry,{_kind:'airspace',sev:'hard',cls:'DEF',code:'DEF',
+      name:(f.properties&&f.properties.NAME)||'',_col:'#ff5a3c'}));
+    // special-use airspace: Prohibited = hard (red); Restricted = orange; MOA /
+    // Warning / Alert / Danger = amber advisory (often active only by schedule/NOTAM)
+    const SUA={P:['hard','PROH','#ff5a3c'],R:['caution','RSTD','#ff8c42'],
+      MOA:['caution','MOA','#d9b44a'],W:['caution','WARN','#d9b44a'],A:['caution','ALRT','#d9b44a'],D:['caution','DNGR','#d9b44a']};
+    ((sua&&sua.features)||[]).forEach(f=>{ const p=f.properties||{},t=SUA[p.TYPE_CODE]; if(!t||!f.geometry) return;
+      push(f.geometry,{_kind:'airspace',sev:t[0],cls:p.TYPE_CODE,code:t[1],
+        name:p.NAME||'',lo:p.LOWER_VAL,hi:p.UPPER_VAL,_col:t[2]}); });
+    // part-time national-security UAS zones — hard no-fly for drones (red)
+    ((nsufr&&nsufr.features)||[]).forEach(f=>{ const p=f.properties||{};
+      push(f.geometry,{_kind:'airspace',sev:'hard',cls:'NSUFR',code:'NSUF',
+        name:p.Facility||'security zone',lo:p.Floor,hi:p.Ceiling,_col:'#ff5a3c'}); });
+    // stadiums → 3 nm (5.556 km) rings (the 99.7 event TFR), amber advisory
+    ((stad&&stad.features)||[]).forEach(f=>{ const g=f.geometry; if(!g||g.type!=='Point') return;
+      push({type:'Polygon',coordinates:[circleRing(g.coordinates[1],g.coordinates[0],5.556,48)]},
+        {_kind:'airspace',sev:'caution',cls:'STDM',code:'STDM',name:(f.properties&&f.properties.NAME)||'stadium',_col:'#d9b44a'}); });
     return {type:'FeatureCollection',features:feats};
   },
-  popup:p=>p.cls==='DEF'
-    ? `<h4 style="color:var(--danger)">⛔ NATIONAL DEFENSE AIRSPACE</h4>
-       <div class="kv"><span>name</span>${escapeHtml(String(p.name).slice(0,60)||'—')}</div>
-       <div class="kv"><span>src</span>FAA · no-fly (drones prohibited)</div>`
-    : `<h4>▢ CLASS ${escapeHtml(p.cls||'E')} AIRSPACE</h4>
-       <div class="kv"><span>name</span>${escapeHtml(String(p.name).slice(0,60)||'—')}</div>
-       <div class="kv"><span>src</span>FAA · controlled airspace</div>`
+  popup:p=>{
+    const T={DEF:'⛔ NATIONAL DEFENSE AIRSPACE',NSUFR:'⛔ SECURITY UAS ZONE',P:'⛔ PROHIBITED AREA',
+      R:'⚠ RESTRICTED AREA',MOA:'⚠ MILITARY OPS AREA',W:'⚠ WARNING AREA',A:'⚠ ALERT AREA',D:'⚠ DANGER AREA',
+      STDM:'⚠ STADIUM TFR',B:'▢ CLASS B AIRSPACE',C:'▢ CLASS C AIRSPACE',D2:'▢ CLASS D AIRSPACE',E:'▢ CLASS E AIRSPACE'};
+    const hard=p.sev==='hard';
+    const key=p.cls==='D'&&p.sev==='ctrl'?'D2':p.cls;
+    const hasAlt=(p.lo!=null&&p.lo!=='')||(p.hi!=null&&p.hi!=='');
+    const note=hard?'no-fly (drones prohibited)':p.cls==='STDM'?'active during major events'
+      :p.sev==='caution'?'may be active — verify NOTAMs':'controlled airspace';
+    return `<h4${hard?' style="color:var(--danger)"':''}>${T[key]||'▢ AIRSPACE'}</h4>`
+      +`<div class="kv"><span>name</span>${escapeHtml(String(p.name||'—').slice(0,60))}</div>`
+      +(hasAlt?`<div class="kv"><span>alt</span>${escapeHtml(String(p.lo||'sfc'))} – ${escapeHtml(String(p.hi||'—'))}</div>`:'')
+      +`<div class="kv"><span>src</span>FAA · ${note}</div>`;
+  }
 });
 
 /* =====================================================================
@@ -1306,6 +1326,25 @@ async function sitrepTick(){
     'HF / GPS / grid impact',openBtn(SWPC,'SWPC'),true]);
   if(XRAY&&/^[MX]/.test(XRAY)) general.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
     'HF radio blackout risk',openBtn(SWPC,'SWPC'),true]);
+  // FAA AIRSPACE RESTRICTIONS under the crosshair (from the map layer): hard
+  // no-fly (defense / security / prohibited) as red cards; schedule/event
+  // advisories (restricted / MOA / warning / alert / stadium) as amber. Controlled
+  // airspace (Class B/C/D) isn't carded — the chart's FAA ceiling already covers it.
+  const AT={DEF:'DEFENSE AIRSPACE',NSUFR:'SECURITY NO-FLY',P:'PROHIBITED AREA',
+    R:'RESTRICTED AREA',MOA:'MILITARY OPS AREA',W:'WARNING AREA',A:'ALERT AREA',D:'DANGER AREA',STDM:'STADIUM TFR'};
+  const aspHit=[], aspSeen=new Set();
+  featsIn('src-airspace').forEach(f=>{
+    const p=f.properties; if(p.sev==='ctrl') return;
+    const key=p.code+'|'+p.name; if(aspSeen.has(key)) return;
+    if(!pointInFeature(f,lon,lat)) return;
+    aspSeen.add(key); aspHit.push(p);
+  });
+  aspHit.sort((a,z)=>(a.sev==='hard'?0:1)-(z.sev==='hard'?0:1));
+  aspHit.slice(0,4).forEach(p=>{
+    const sub=p.sev==='hard'?'drones prohibited':p.cls==='STDM'?'no-fly during events':'may be active — verify NOTAMs';
+    general.push([p.sev==='hard'?'danger':'alert', p.sev==='hard'?'⛔':'⚠',
+      AT[p.cls]||'AIRSPACE', cut(p.name||'—',22), sub, '', true]);
+  });
 
   // -- INDIVIDUAL item cards: one per in-view feature (planes, warnings,
   //    emergencies), all interleaved. HAZARDS OUTRANK ROUTINE TRAFFIC: a
@@ -1661,8 +1700,25 @@ const FLY={
 };
 window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // debug/test handle
 
+// Hard airspace restriction under the crosshair, read from the loaded map layer:
+// a Prohibited area (PROH) or a national-security UAS zone (NSUF) that grounds the
+// chart. Defense zones are excluded here — the canifly FAA cap already grounds
+// those. Only fires where the airspace layer has data (zoomed in, ≥z7); the
+// authoritative canifly point-query still runs regardless. Advisory zones
+// (Restricted/MOA/Warning/Alert/stadium) never ground the chart — they may be
+// schedule-only, so they stay on the map + SITREP with a "verify" note.
+function flyRestriction(){
+  const c=gl.getCenter(); let hit=null;
+  featsIn('src-airspace').forEach(f=>{
+    const p=f.properties;
+    if(hit||p.sev!=='hard'||p.cls==='DEF') return;
+    if(pointInFeature(f,c.lng,c.lat)) hit={code:p.code,name:p.name};
+  });
+  return hit;
+}
+
 // Apply every gate and build the render model — the canifly paint() core, plus
-// the two sitrep integrations (TRFC cells, PCPN gate).
+// the sitrep integrations (TRFC cells, PCPN gate, hard-airspace grounding).
 function flyComputeDetail(){
   const {aloft,kp,asp}=FLY.data;
   const aspCapFt=asp==null?SPEC.regFt:(asp.ceilFt<=0?-1:Math.min(SPEC.regFt,asp.ceilFt));
@@ -1672,6 +1728,7 @@ function flyComputeDetail(){
   const nowMs=Date.now();
   const kpAt=n=>{ if(!kp) return null; return (kp.next!=null&&kp.nextMs!=null&&nowMs+n*3600e3>=kp.nextMs)?kp.next:kp.now; };
   const traffic=flyTrafficRows();
+  const restrict=flyRestriction();   // a hard Prohibited/security zone grounds every column
   const grid=cols.map((c,n)=>{
     const prof=makeProfile(c.windPts);
     const visSM=c.visM!=null?c.visM*M_TO_SM:null;
@@ -1679,7 +1736,7 @@ function flyComputeDetail(){
     const gGust=atLim(c.gustKt), gVis=visSM!=null&&visSM<SPEC.visSM, gKp=kpv!=null&&kpv>=SPEC.kpMax;
     // PCPN — radar is a NOW product, so only the NOW column can carry the gate
     const gPcpn=n===0&&FLY.precip===true;
-    const globalGrounded=gGust||gVis||gKp||gPcpn;
+    const globalGrounded=gGust||gVis||gKp||gPcpn||!!restrict;   // hard airspace grounds all hours
     const cloudCapFt=c.baseFt==null?Infinity:(c.baseFt-SPEC.clrFt);
     let hitFt=null; for(const ft of ALTS_UP){ if(atLim(prof(ft))){ hitFt=ft; break; } }
     const windCeilFt=hitFt==null?SPEC.regFt:hitFt-50;
@@ -1692,6 +1749,7 @@ function flyComputeDetail(){
     if(grounded){
       reasonAlt=0;
       reason = aspCapFt<0 ? 'FAA'
+             : restrict ? restrict.code
              : gGust ? 'GUST'
              : gVis ? 'VIS'
              : gPcpn ? 'PCPN'
@@ -1758,6 +1816,7 @@ function flyInfoHtml(){
   const faaUrl=hasLoc?faaMapUrl(FLY.data.lat,FLY.data.lon):`https://www.arcgis.com/home/item.html?id=${FAA_ITEM}`;
   const w=k=>FLY.err[k]?' warn':'';
   const wac=['nearair','mil','sos'].some(id=>LAYER_STATE[id]&&LAYER_STATE[id].errored)?' warn':'';
+  const wasp=LAYER_STATE.airspace&&LAYER_STATE.airspace.errored?' warn':'';
   return `<div class="infobox" role="region" aria-label="Limits and data sources"><div class="iwrap">`
     +`<div class="ihead">Ceiling values</div>`
     +`<div class="irow"><span class="ic">faa</span><span class="id${w('asp')}">laanc &middot; defense &middot; ${SPEC.regFt} ft</span></div>`
@@ -1769,12 +1828,15 @@ function flyInfoHtml(){
     +`<div class="irow"><span class="ic">vis</span><span class="id${w('om')}">&lt; ${SPEC.visSM} sm</span></div>`
     +`<div class="irow"><span class="ic">pcpn</span><span class="id${w('radar')}">radar echo in range</span></div>`
     +`<div class="irow"><span class="ic">kp</span><span class="id${w('kp')}">&ge; ${SPEC.kpMax}</span></div>`
+    +`<div class="irow"><span class="ic">proh</span><span class="id${wasp}">prohibited area overhead</span></div>`
+    +`<div class="irow"><span class="ic">nsuf</span><span class="id${wasp}">security uas zone overhead</span></div>`
     +`<div class="ihead">Data values</div>`
     +`<div class="irow"><a class="isrc" href="${faaUrl}" target="_blank" rel="noopener">faa</a><span class="id${w('asp')}">airspace</span></div>`
     +`<div class="irow"><a class="isrc" href="${omUrl}" target="_blank" rel="noopener">open-meteo</a><span class="id${w('om')}">wind &middot; vis &middot; sky</span></div>`
     +`<div class="irow"><a class="isrc" href="${KP_URL}" target="_blank" rel="noopener">noaa swpc</a><span class="id${w('kp')}">kp</span></div>`
     +`<div class="irow"><a class="isrc" href="https://mesonet.agron.iastate.edu/GIS/" target="_blank" rel="noopener">nexrad</a><span class="id${w('radar')}">pcpn radar</span></div>`
     +`<div class="irow"><a class="isrc" href="https://airplanes.live/" target="_blank" rel="noopener">ads-b</a><span class="id${wac}">trfc aircraft</span></div>`
+    +`<div class="irow"><a class="isrc" href="${faaUrl}" target="_blank" rel="noopener">faa sua</a><span class="id${wasp}">restrictions overlay</span></div>`
     +`</div></div>`;
 }
 // The settings box — max wind + range — rendered into its own #fly-settings box
@@ -1922,16 +1984,19 @@ function flyOnMove(){
    so the map shows exactly the radius the flyability check sweeps.
    ===================================================================== */
 const RING_N=96;   // vertices — a smooth circle at any zoom
-function ringFC(lat,lon,miles){
-  // equirectangular circle — exact enough for the 0.5–15 mi range band
-  const km=miles*MI_TO_KM;
-  const dLat=km/111.32;
-  const dLon=km/(111.32*Math.max(0.2,Math.cos(lat*Math.PI/180)));
-  const ring=[];
-  for(let i=0;i<=RING_N;i++){ const t=i/RING_N*2*Math.PI;
+// A closed ring of [lon,lat] points approximating a circle of `km` radius around
+// (lat,lon). Equirectangular — exact enough for the small radii here (range ring,
+// 3 nm stadium rings). Shared by the range ring and the airspace stadium buffers.
+function circleRing(lat,lon,km,n){
+  n=n||RING_N;
+  const dLat=km/111.32, dLon=km/(111.32*Math.max(0.2,Math.cos(lat*Math.PI/180))), ring=[];
+  for(let i=0;i<=n;i++){ const t=i/n*2*Math.PI;
     ring.push([lon+dLon*Math.cos(t), lat+dLat*Math.sin(t)]); }
+  return ring;
+}
+function ringFC(lat,lon,miles){
   return {type:'FeatureCollection',features:[{type:'Feature',
-    geometry:{type:'Polygon',coordinates:[ring]},properties:{}}]};
+    geometry:{type:'Polygon',coordinates:[circleRing(lat,lon,miles*MI_TO_KM,RING_N)]},properties:{}}]};
 }
 let _ringRaf=0;
 function updateRing(){
