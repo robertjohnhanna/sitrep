@@ -42,7 +42,6 @@
 
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
 
 <style>
   :root{
@@ -110,8 +109,8 @@
      is one-screen) so the layer sections stay reachable below it; negative
      margins bleed it to the panel edges past the scroll padding. */
   #fly-pane{height:clamp(340px,52vh,520px);margin:-8px -8px 8px;
-    border-bottom:1px solid var(--line);background:#000}
-  #fly-frame{width:100%;height:100%;border:0;display:block;background:#000}
+    border-bottom:1px solid var(--line);background:#000;display:flex;justify-content:center}
+  #fly-frame{width:100%;height:100%;border:0;display:block;background:#000;margin:0 auto}
   /* LAYERS label + its own 30s refresh timer (separate from canifly above) */
   #layers-head{display:flex;align-items:center;gap:8px;margin:2px 2px 4px;
     font-size:13px;letter-spacing:1.2px;color:var(--ink-dim);font-weight:700}
@@ -171,31 +170,6 @@
   .pop .sub{font-size:13px;color:var(--ink);line-height:1.45;margin-top:6px;
     max-height:120px;overflow:auto;overflow-wrap:anywhere}
   .pop .lnk{margin-top:7px;font-size:13px;overflow-wrap:anywhere}
-
-  /* ---------- list modal (aircraft in view, etc.) ---------- */
-  #modal{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
-    background:#000b;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
-    padding:calc(var(--sa-t) + 14px) 14px calc(var(--sa-b) + 14px)}
-  #modal[hidden]{display:none}
-  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    width:min(340px,92vw);max-height:min(76vh,100%);display:flex;flex-direction:column;overflow:hidden;
-    box-shadow:0 18px 50px #000c}
-  .modal-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);
-    color:var(--accent);font-weight:700;letter-spacing:1.5px;font-size:13px;flex:0 0 auto}
-  .modal-head button{margin-left:auto;background:none;border:none;color:var(--ink-dim);
-    font-size:16px;cursor:pointer;line-height:1;padding:2px 4px}
-  #modal-list{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0}
-  /* minimal stacked entry: callsign / model / distance·alt — no icon, no button.
-     Direct-child selectors only, so nested .u unit spans stay inline (else the
-     'mi'/'ft' tokens each became their own line and the rows ballooned). */
-  .mrow{padding:7px 14px;border-bottom:1px solid #10171f;line-height:1.3;cursor:pointer}
-  .mrow:hover{background:var(--panel2)}
-  .mrow:active{background:var(--panel)}
-  .mrow>b{color:var(--ink);display:block;font-weight:700;font-size:13px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .mrow>span{color:var(--ink-dim);font-size:12px;display:block;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .mrow.mil>b{color:var(--warn)}
 
   /* ---------- toasts ---------- */
   #toast{position:absolute;top:calc(var(--topbar-h) + 10px);left:50%;transform:translateX(-50%);
@@ -327,7 +301,6 @@
     <div id="layers-head">MAP LAYERS <span class="badge" id="utc-badge" title="time to next layer refresh"><b id="refresh-count">30</b>s to update</span></div>
     <div class="sec-h">Aircraft</div><div id="grp-air"></div>
     <div class="sec-h">Maritime &amp; rail</div><div id="grp-surface"></div>
-    <div class="sec-h">Space</div><div id="grp-space"></div>
     <div class="sec-h">Earth &amp; hazard</div><div id="grp-hazard"></div>
   </div>
   <div id="panel-foot"><span style="opacity:.6">© OpenStreetMap · CARTO</span></div>
@@ -368,14 +341,6 @@
 
 <div id="toast"></div>
 
-<!-- list modal (e.g. all aircraft in view) -->
-<div id="modal" hidden>
-  <div class="modal-card">
-    <div class="modal-head"><span id="modal-title">LIST</span><button id="modal-x" aria-label="close">✕</button></div>
-    <div id="modal-list"></div>
-  </div>
-</div>
-
 <script>
 "use strict";
 /* =====================================================================
@@ -404,36 +369,6 @@ async function getText(url,opts={}){
   const c=new AbortController(); const to=setTimeout(()=>c.abort(),opts.timeout||20000);
   try{ const r=await fetch(url,{signal:c.signal}); if(!r.ok)throw new Error('HTTP '+r.status); return await r.text(); }
   finally{ clearTimeout(to); }
-}
-// CelesTrak rate-limits bursts (verified: 3-4 rapid requests → HTTP 403, but 3
-// spaced ≥4s apart all succeed), so the space layers (sats/gps/starlink) share a
-// serialized queue that keeps requests ≥4s apart. On any error (403/timeout) it
-// backs off 90s so a failed load's retries don't hammer the limit further — the
-// #1 cause of Starlink stuck on "-". Timeout is generous (Starlink is ~1.8 MB).
-let _ctChain=Promise.resolve(), _ctLast=0, _ctCooldownUntil=0;
-function celestrakGet(url,opts={}){
-  const ck='sitrep.ct.'+url;
-  const p=_ctChain.then(async()=>{
-    const now=Date.now();
-    const wait=Math.max(_ctCooldownUntil-now, 4000-(now-_ctLast), 0);
-    if(wait>0) await new Promise(r=>setTimeout(r,wait));
-    _ctLast=Date.now();
-    try{
-      const txt=await getText(url,Object.assign({timeout:40000},opts));
-      // cache the last-good TLE — TLEs stay accurate for days, and SGP4 always
-      // propagates to "now", so a cached set still gives current positions if
-      // the feed is down (or on a cold reload before the first fetch lands).
-      try{ localStorage.setItem(ck,txt); }catch(e){}
-      return txt;
-    }catch(e){
-      _ctCooldownUntil=Date.now()+90000;                    // back off after a failure
-      let cached=null; try{ cached=localStorage.getItem(ck); }catch(_){}
-      if(cached){ console.warn('[celestrak] feed down — using cached',url); return cached; }
-      throw e;
-    }
-  });
-  _ctChain=p.catch(()=>{});   // keep the queue moving even if one request fails
-  return p;
 }
 // All times shown in the user's LOCAL time — the timezone detected for their
 // location (USER.tz, from IP geolocation), falling back to the browser's zone.
@@ -675,7 +610,7 @@ function shapeURL(color,pts){
 // shorter list, so e.g. flood gauges showed a plain dot).
 const ICON_EMOJI={'ico-fire':'🔥','ico-volcano':'🌋','ico-cyclone':'🌀','ico-flood':'🌊',
   'ico-quake':'🟠','ico-drought':'🏜️','ico-ice':'🧊','ico-storm':'⛈️','ico-dust':'🌫️',
-  'ico-launch':'🚀','ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬','ico-iss':'🛰️',
+  'ico-antenna':'📡','ico-radio':'📻','ico-atc':'🛬',
   'ico-train':'🚆','ico-disaster':'⚠️','ico-news':'📰',
   'ico-conflict':'💥','ico-malware':'🦠','ico-outage':'📴',
   'ico-water':'💧','ico-pin':'📍'};
@@ -686,7 +621,6 @@ function panelIconHTML(cfg){
   if(ic==='ship')      return `<img class="pic" src="${shapeURL(cfg.color,SHIP)}">`;
   if(ic==='veh-train') return `<img class="pic" src="${shapeURL(cfg.color,TRAIN)}">`;
   if(ic==='ico-cam'&&CAM_URL) return `<img class="pic" src="${CAM_URL}">`;
-  if(ic==='ico-sat'&&SAT_URL) return `<img class="pic" src="${SAT_URL}">`;
   if(ic==='ico-gauge'&&GAUGE_URL) return `<img class="pic" src="${GAUGE_URL}">`;
   const em=ICON_EMOJI[ic];
   if(em) return `<span class="pic emj">${em}</span>`;
@@ -718,17 +652,6 @@ function camIcon(){ return makeGlyph((x,s)=>{ const u=s/32; x.translate(s/2,s/2)
   x.fillStyle='#0b1420';x.beginPath();x.arc(0,1*u,5.5*u,0,7);x.fill();x.stroke();
   x.fillStyle='#9fe8ff';x.beginPath();x.arc(0,1*u,2.4*u,0,7);x.fill();
 }); }
-function satIcon(){ return makeGlyph((x,s)=>{ const u=s/32; x.translate(s/2,s/2);
-  x.strokeStyle='rgba(3,8,14,.85)';x.lineWidth=u*1.1;
-  // solar panels
-  x.fillStyle='#8fb6ff';
-  x.beginPath();x.rect(-13*u,-4*u,7*u,8*u);x.fill();x.stroke();
-  x.beginPath();x.rect(6*u,-4*u,7*u,8*u);x.fill();x.stroke();
-  // body
-  x.fillStyle='#e6eefc';x.beginPath();x.roundRect(-5*u,-5*u,10*u,10*u,2*u);x.fill();x.stroke();
-  // dish
-  x.fillStyle='#38d0ff';x.beginPath();x.arc(0,0,2.6*u,0,7);x.fill();
-}); }
 // river/flood GAUGE — a measuring staff standing in water (distinct from the
 // plain water-drop used elsewhere)
 function gaugeIcon(){ return makeGlyph((x,s)=>{ const u=s/32; x.translate(s/2,s/2);
@@ -743,16 +666,15 @@ function gaugeIcon(){ return makeGlyph((x,s)=>{ const u=s/32; x.translate(s/2,s/
   x.strokeStyle='#0b1420';x.lineWidth=u*1.2;
   [-9,-5,-1].forEach(i=>{x.beginPath();x.moveTo(-2.2*u,i*u);x.lineTo(2.2*u,i*u);x.stroke();});
 }); }
-let CAM_URL='',SAT_URL='',GAUGE_URL='';
+let CAM_URL='',GAUGE_URL='';
 function registerIcons(){
   addImg('ac-near',  shapeIcon('#2fe07a',PLANE));   // aircraft = green
   addImg('ac-mil',   shapeIcon(YEL,PLANE));         // military = yellow
   addImg('ac-sos',   shapeIcon('#ff4455',PLANE,44));// emergency = red
   addImg('ship',     shapeIcon(YEL,SHIP));          // ships = yellow
   addImg('veh-train',shapeIcon(YEL,TRAIN));         // trains = yellow
-  const cam=camIcon(), sat=satIcon(), gauge=gaugeIcon();
+  const cam=camIcon(), gauge=gaugeIcon();
   addImg('ico-cam',cam.data); CAM_URL=cam.url;      // clearer camera glyph
-  addImg('ico-sat',sat.data); SAT_URL=sat.url;      // satellite glyph
   addImg('ico-gauge',gauge.data); GAUGE_URL=gauge.url; // river/flood gauge glyph
   for(const k in ICON_EMOJI) addImg(k,emojiIcon(ICON_EMOJI[k]));
 }
@@ -826,57 +748,6 @@ defLayer({
 
 
 defLayer({
-  id:'iss', label:'ISS (live)', color:'#ffffff', group:'space', refresh:30, defaultOff:true, icon:'ico-iss', iconSize:0.62,
-  loader: async ()=>{
-    const s=await getJSON('https://api.wheretheiss.at/v1/satellites/25544');
-    return {type:'FeatureCollection',features:[{type:'Feature',
-      geometry:{type:'Point',coordinates:[s.longitude,s.latitude]},
-      properties:{_kind:'iss',_r:7,alt:Math.round(s.altitude),vel:Math.round(s.velocity),
-        vis:s.visibility}}]};
-  },
-  popup:p=>`<h4>🛰 International Space Station</h4>
-    <div class="kv"><span>altitude</span>${p.alt} km</div>
-    <div class="kv"><span>velocity</span>${Number(p.vel).toLocaleString()} km/h</div>
-    <div class="kv"><span>visibility</span>${escapeHtml(p.vis)}</div>
-    <div class="kv"><span>src</span>wheretheiss.at (live)</div>`
-});
-
-defLayer({
-  id:'sats', label:'Bright satellites', color:'#7ee0ff', group:'space', refresh:600, defaultOff:true, icon:'ico-sat', iconSize:0.42,
-  loader: async ()=>{
-    // CelesTrak TLEs -> SGP4 propagated to "now", entirely in-browser
-    const txt=await celestrakGet('https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle');
-    return tleToFC(txt);
-  },
-  popup:p=>`<h4>🛰 ${escapeHtml(p.name)}</h4>
-    <div class="kv"><span>alt</span>${p.alt} km</div>
-    <div class="kv"><span>src</span>CelesTrak TLE · SGP4 in-browser</div>`
-});
-
-defLayer({
-  id:'gps', label:'GPS constellation', color:'#8f9dff', group:'space', refresh:600, defaultOff:true, icon:'ico-sat', iconSize:0.42,
-  loader: async ()=>{
-    const txt=await celestrakGet('https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMAT=tle');
-    return tleToFC(txt);
-  },
-  popup:p=>`<h4>🛰 ${escapeHtml(p.name)}</h4>
-    <div class="kv"><span>alt</span>${p.alt} km</div>
-    <div class="kv"><span>src</span>CelesTrak GPS ops · SGP4</div>`
-});
-
-defLayer({
-  id:'starlink', label:'Starlink (SpaceX)', color:'#dff0ff', group:'space', refresh:900, defaultOff:true, icon:'ico-sat', iconSize:0.36,
-  loader: async ()=>{
-    // full constellation — every Starlink sat, SGP4-propagated in-browser
-    const txt=await celestrakGet('https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle');
-    return tleToFC(txt);
-  },
-  popup:p=>`<h4>🛰 ${escapeHtml(p.name)}</h4>
-    <div class="kv"><span>alt</span>${p.alt} km</div>
-    <div class="kv"><span>net</span>SpaceX Starlink · SGP4</div>`
-});
-
-defLayer({
   id:'amtrak', label:'Amtrak trains', color:'#ffce4d', group:'surface', refresh:30, defaultOff:true, icon:'veh-train', iconSize:0.6,
   loader: async ()=>{
     const j=await getJSON('https://api-v3.amtraker.com/v3/trains');
@@ -895,26 +766,6 @@ defLayer({
     <div class="kv"><span>speed</span>${escapeHtml(p.vel)}</div>
     ${p.late?`<div class="kv"><span>status</span>${escapeHtml(p.late)}</div>`:''}`
 });
-
-// shared: TLE text -> propagated FeatureCollection
-function tleToFC(txt){
-  const lines=txt.split(/\r?\n/).filter(l=>l.trim().length);
-  const now=new Date(); const gmst=satellite.gstime(now);
-  const feats=[];
-  for(let i=0;i+2<lines.length;i+=3){
-    try{
-      const name=lines[i].trim();
-      const rec=satellite.twoline2satrec(lines[i+1],lines[i+2]);
-      const pv=satellite.propagate(rec,now); if(!pv.position) continue;
-      const gd=satellite.eciToGeodetic(pv.position,gmst);
-      const lon=satellite.degreesLong(gd.longitude), lat=satellite.degreesLat(gd.latitude);
-      if(!isFinite(lon)||!isFinite(lat)) continue;
-      feats.push({type:'Feature',geometry:{type:'Point',coordinates:[lon,lat]},
-        properties:{_kind:'sat',name,alt:Math.round(gd.height)}});
-    }catch(e){}
-  }
-  return {type:'FeatureCollection',features:feats};
-}
 
 /* ---------------- Hazard / Environment ---------------- */
 defLayer({
@@ -992,25 +843,6 @@ defLayer({
     ${p.country?`<div class="kv"><span>country</span>${escapeHtml(p.country)}</div>`:''}
     ${p.sev?`<div class="kv"><span>severity</span>${escapeHtml(p.sev)}</div>`:''}
     <div class="kv"><span>src</span>GDACS (UN/EC)</div>`
-});
-
-defLayer({
-  id:'launch', label:'Rocket launches', color:'#c77dff', group:'space', refresh:3600, defaultOff:true, icon:'ico-launch', iconSize:0.5,
-  // upcoming orbital launches worldwide, plotted at the pad. Launch Library 2
-  // (thespacedevs) — keyless, CORS *, anonymous rate-limited so we poll hourly.
-  loader: async ()=>{
-    const j=await getJSON('https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=100&hide_recent_previous=true',{timeout:20000});
-    return {type:'FeatureCollection',features:(j.results||[])
-      .filter(r=>r.pad&&r.pad.latitude&&r.pad.longitude).map(r=>({
-        type:'Feature',geometry:{type:'Point',coordinates:[+r.pad.longitude,+r.pad.latitude]},
-        properties:{_kind:'launch',name:r.name,net:r.net||'',pad:(r.pad.name||''),
-          prov:(r.launch_service_provider||{}).name||'',status:(r.status||{}).abbrev||''}}))};
-  },
-  popup:p=>`<h4>🚀 ${escapeHtml(p.name)}</h4>
-    ${p.prov?`<div class="kv"><span>provider</span>${escapeHtml(p.prov)}</div>`:''}
-    <div class="kv"><span>T-0</span>${escapeHtml(fmtDateTime(p.net))}</div>
-    <div class="kv"><span>pad</span>${escapeHtml(p.pad)}</div>
-    <div class="kv"><span>status</span>${escapeHtml(p.status)}</div>`
 });
 
 defLayer({
@@ -1276,8 +1108,7 @@ function refreshTick(){
 }
 
 function buildLayerPanel(){
-  const groups={air:'#grp-air',surface:'#grp-surface',space:'#grp-space',
-    hazard:'#grp-hazard'};
+  const groups={air:'#grp-air',surface:'#grp-surface',hazard:'#grp-hazard'};
   // panel order within a group: lower `ord` first (NWS, then outlook), the rest
   // keep their definition order (stable sort)
   LAYERS.slice().sort((a,b)=>(a.ord||99)-(b.ord||99)).forEach(cfg=>{
@@ -1433,60 +1264,6 @@ async function loadXray(){
   }catch(e){ XRAY=null; }
   scheduleSitrep();
 }
-// WORLD NEWS — Wikipedia "Current events" portal, keyless + CORS-*. We pull the
-// daily page's wikitext and keep only the editor-categorised sections we care
-// about (no sports/culture keyword-guessing). No map layer — it feeds a WORLD
-// section in the SITREP. Each section has an icon; NEWS_ORDER is the priority.
-const NEWS_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-const NEWS_SECTIONS={
-  'Armed conflicts and attacks':'⚔️','Disasters and accidents':'🌊',
-  'International relations':'🤝','Politics and elections':'🗳️',
-  'Law and crime':'⚖️','Science and technology':'🔬'};
-const NEWS_ORDER=['⚔️','🌊','🤝','🗳️','⚖️','🔬']; // display + priority order
-let WORLD_NEWS=[]; // [{text,url,icon}]
-function parseCurrentEvents(wt){
-  const m=wt.match(/\|\s*content\s*=([\s\S]*)/);
-  const body=(m?m[1]:wt).split(/\r?\n/);
-  let icon=null; const out=[];
-  for(const raw of body){
-    const line=raw.trim();
-    if(!line) continue;
-    const h=line.match(/^'''(.+?)'''$/);            // section header, e.g. '''Disasters and accidents'''
-    if(h){ icon=NEWS_SECTIONS[h[1].trim()]||null; continue; }
-    if(!icon || !/^\*+/.test(line)) continue;        // only inside a wanted section, bullet lines
-    if(!/\[https?:\/\//.test(line)) continue;        // leaf lines carry a source link = an actual event
-    const um=line.match(/\[(https?:\/\/[^\s\]]+)/);   // first external source URL → OPEN target
-    let t=line.replace(/\[https?:\/\/[^\]]*\]/g,'')   // drop [url (Source)] citations
-      .replace(/\[\[[^\]|]*\|([^\]]+)\]\]/g,'$1')     // [[a|b]] → b
-      .replace(/\[\[([^\]]+)\]\]/g,'$1')              // [[a]]  → a
-      .replace(/'''?/g,'').replace(/\{\{[^}]*\}\}/g,'').replace(/<[^>]+>/g,'')
-      .replace(/^\*+\s*/,'').replace(/\s+/g,' ').trim();
-    if(t.length>10) out.push({text:t,url:um?um[1]:'',icon});
-  }
-  return out;
-}
-async function loadWorldNews(){
-  const now=new Date();
-  for(let back=0;back<3;back++){
-    const d=new Date(now.getTime()-back*864e5);
-    const page='Portal:Current events/'+d.getUTCFullYear()+' '+NEWS_MONTHS[d.getUTCMonth()]+' '+d.getUTCDate();
-    try{
-      const j=await getJSON('https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&origin=*&page='+encodeURIComponent(page),{timeout:12000});
-      const wt=j&&j.parse&&j.parse.wikitext&&j.parse.wikitext['*'];
-      if(!wt) continue;
-      const items=parseCurrentEvents(wt);
-      if(items.length){
-        // balance across categories (up to 3 each, in priority order) so no
-        // single busy section crowds the others out; cap the total
-        const out=[];
-        NEWS_ORDER.forEach(ic=>out.push(...items.filter(x=>x.icon===ic).slice(0,3)));
-        WORLD_NEWS=out.slice(0,14);
-        return;
-      }
-    }catch(e){}
-  }
-}
-
 /* =====================================================================
    6b. LOCATION + SITREP — the "at a glance" intelligence layer
    Fix chain: ipwho.is (instant, keyless, no prompt) -> browser GPS
@@ -1635,65 +1412,46 @@ const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));
 const gName=p=>p.eventname||p.name||p.type||'event';
 
 // -- CATEGORY MODEL --------------------------------------------------------
-// Every hazard/traffic feed renders as ONE uniform SITREP card (same shape as
-// the aircraft card): "N NAME IN VIEW/GLOBAL" · nearest one · direction+distance
-// +datum, and >1 item opens a clickable LIST (fly to each on the map). Each cfg
-// is pure property-formatting; distance/bearing is added by the card/list code.
-//   scope : 'view'  → only items inside the current map area
-//           'global'→ counted worldwide (rare, critical: emergencies, disasters)
-//   cls(scoped) → '', 'alert' (amber) or 'danger' (red) for the WORST in scope
-//   hazard: contributes to the SITREP title colour (traffic layers don't)
-//   head : the nearest one's headline (line 2 / list bold)
-//   sub  : list-only secondary line ('' to omit)
-//   detail: the extra datum on line 3 / list ('' to omit)
+// Each in-view feature becomes ONE individual SITREP card. A cfg maps a feed to
+// a card shape; distance/direction (to the crosshair) is added by the SITREP
+// code. Only items inside the current map area are ever shown.
+//   cls(f) → '', 'alert' (amber) or 'danger' (red) for THIS item
+//   hazard : contributes to the SITREP title colour (traffic doesn't)
+//   head   : line 1 — the item's headline
+//   sub    : line 2 — secondary detail
+//   detail : appended to line 3 after the distance (extra datum; '' to omit)
 const ALT=f=>{const a=f.properties.alt;return a!=null&&a!=='?'?a+U(' ft'):'—';};
 const CATS=[
-  {src:'src-sos', hazard:true, scope:'global', icon:'🚨',
-   one:'AIRCRAFT EMERGENCY', many:'AIRCRAFT EMERGENCIES', cls:()=>'danger',
+  {src:'src-sos', hazard:true, icon:'🚨', cls:()=>'danger',
    head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
-   // sos features carry `code` (the squawk they matched) — `sq` was never set
-   sub:f=>'', detail:f=>'sq '+(f.properties.code||'7700')},
-  {src:'src-nws', hazard:true, scope:'view', icon:'⚠',
-   one:'WEATHER WARNING', many:'WEATHER WARNINGS',
-   cls:a=>a.some(f=>/Extreme|Severe/i.test(f.properties.severity))?'danger':'alert',
-   // the warning LIST orders by severity (Extreme→Minor), most dangerous first
-   rank:f=>({extreme:4,severe:3,moderate:2,minor:1}[String(f.properties.severity||'').toLowerCase()]||0),
+   sub:f=>escapeHtml(f.properties.desc||f.properties.type||'aircraft'),
+   detail:f=>'sq '+(f.properties.code||'7700')},
+  {src:'src-nws', hazard:true, icon:'⚠',
+   cls:f=>/Extreme|Severe/i.test(f.properties.severity)?'danger':'alert',
    head:f=>cut((f.properties.event||'warning').replace(/\s*warning$/i,'').toUpperCase(),22),
    sub:f=>cut(f.properties.area,26), detail:f=>cut(f.properties.severity||'active',12)},
-  // quake icon matches the map's orange marker — the globe now means GLOBAL scope
-  {src:'src-emsc', hazard:true, scope:'view', icon:'🟠',
-   one:'EARTHQUAKE', many:'EARTHQUAKES',
-   // alarm on FRESH strong quakes only (<24 h) — the feed holds days of history,
-   // so an old M5 in view must not leave the title permanently red
-   cls:a=>a.some(f=>+f.properties.mag>=5&&f.properties.age<24)?'danger'
-       :a.some(f=>+f.properties.mag>=4&&f.properties.age<24)?'alert':'',
+  {src:'src-emsc', hazard:true, icon:'🟠',
+   // alarm on FRESH strong quakes only (<24 h) — the feed holds days of history
+   cls:f=>(+f.properties.mag>=5&&f.properties.age<24)?'danger'
+       :(+f.properties.mag>=4&&f.properties.age<24)?'alert':'',
    head:f=>'M'+f.properties.mag+' · '+cut(f.properties.place,16),
    sub:f=>'depth '+Math.round(f.properties.depth||0)+U(' km'),
    detail:f=>fmtTime(f.properties.time)},
-  {src:'src-eonet', hazard:true, scope:'view', icon:'🔥',
-   one:'NATURAL EVENT', many:'NATURAL EVENTS', cls:()=>'',
-   head:f=>cut(f.properties.title,20), sub:f=>'',
-   detail:f=>cut((f.properties.cat||'natural event'),12)},
-  {src:'src-gdacs', hazard:true, scope:'global', icon:'🌀',
-   one:'DISASTER', many:'DISASTERS',
-   // Red ANYWHERE = red (rare, catastrophic). Orange only alarms when IN VIEW —
-   // there is almost always an Orange somewhere on Earth, and a permanently
-   // amber title is no signal at all.
-   cls:(a,b)=>a.some(f=>f.properties.level==='Red')?'danger'
-       :a.some(f=>f.properties.level==='Orange'&&featInBounds(f,b))?'alert':'',
+  {src:'src-eonet', hazard:true, icon:'🔥', cls:()=>'',
+   head:f=>cut(f.properties.title,20),
+   sub:f=>cut(f.properties.cat||'natural event',22), detail:f=>''},
+  {src:'src-gdacs', hazard:true, icon:'🌀',
+   cls:f=>f.properties.level==='Red'?'danger':f.properties.level==='Orange'?'alert':'',
    head:f=>cut(gName(f.properties),18),
    sub:f=>cut((f.properties.type||'event')+(f.properties.country?' · '+f.properties.country:''),26),
    detail:f=>cut(f.properties.level||f.properties.type||'',14)},
-  {src:'src-nearair', hazard:false, scope:'view', icon:'✈',
-   one:'AIRCRAFT', many:'AIRCRAFT', cls:()=>'',
+  {src:'src-nearair', hazard:false, icon:'✈', cls:()=>'',
    head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'aircraft'), detail:ALT},
-  {src:'src-mil', hazard:false, scope:'view', icon:'🎖', mil:true,
-   one:'MILITARY AIRCRAFT', many:'MILITARY AIRCRAFT', cls:()=>'alert',
+  {src:'src-mil', hazard:false, icon:'🎖', mil:true, cls:()=>'alert',
    head:f=>cut(f.properties.flight||f.properties.hex||'?',10),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'military'), detail:ALT},
 ];
-const catOf=src=>CATS.find(c=>c.src===src);
 // is a point/polygon feature inside the given view bounds? For polygons: any
 // vertex in view, OR the polygon CONTAINS the view centre — without the second
 // test, zooming deep inside a large warning area made its card vanish exactly
@@ -1705,28 +1463,10 @@ function featInBounds(f,b){
   if(rings.some(r=>r.some(pt=>inBounds(b,pt[0],pt[1])))) return true;
   return pointInFeature(f,(b.getWest()+b.getEast())/2,(b.getSouth()+b.getNorth())/2);
 }
-// items of a category currently in scope (view / global)
+// features of a category currently inside the map area
 function catItems(cfg,b){
   let items=featsIn(cfg.src); if(cfg.filter) items=items.filter(cfg.filter);
-  return cfg.scope==='global'?items:items.filter(f=>featInBounds(f,b));
-}
-// LIST modal body: every item in scope, nearest-first, each a clickable row
-// (fly to its location). Generalises the old aircraft-only roster.
-function catListHTML(srcId){
-  const cfg=catOf(srcId); if(!cfg) return '<div class="sit-empty">NONE</div>';
-  const c=gl.getCenter(), b=viewBounds();
-  const rLat=c.lat, rLon=c.lng;   // crosshair — same reference as the card's "nearest", so row 1 = the card
-  const rows=catItems(cfg,b).map(f=>{const pt=polyPt(f);
-      return pt?{f,pt,km:havKm(rLat,rLon,pt[1],pt[0])}:null;})
-    .filter(Boolean).sort((x,y)=> cfg.rank ? (cfg.rank(y.f)-cfg.rank(x.f))||(x.km-y.km) : x.km-y.km);
-  if(!rows.length) return '<div class="sit-empty">NONE IN THIS AREA</div>';
-  return rows.map(({f,pt,km})=>{
-    const dir=compass(bearing(rLat,rLon,pt[1],pt[0]));
-    const sub=cfg.sub?cfg.sub(f):'', det=cfg.detail?cfg.detail(f):'';
-    return `<div class="mrow${cfg.mil?' mil':''}" data-act="fly" data-ll="${pt[0]+','+pt[1]}">`+
-      `<b>${cfg.head(f)}</b>`+(sub?`<span>${sub}</span>`:'')+
-      `<span>${dir} ${fmtMi(km)}${det?' · '+det:''}</span></div>`;
-  }).join('');
+  return items.filter(f=>featInBounds(f,b));
 }
 
 let sitrepGen=0;
@@ -1743,70 +1483,22 @@ async function sitrepTick(){
     `<span class="tx"><s1>${l1||''}</s1><s2>${l2||''}</s2><s3>${l3||''}</s3></span>`+
     `${act||''}</div>`);
   const llBtn=(lo,la,lbl)=>isFinite(lo)&&isFinite(la)?`<button class="act" data-act="fly" data-ll="${lo+','+la}">${lbl||'VIEW'}</button>`:'';
-  const flyBtn=f=>llBtn(f.geometry.coordinates[0],f.geometry.coordinates[1]);
   const openBtn=(url,lbl)=>`<button class="act" data-act="open" data-url="${escapeHtml(url)}">${lbl||'OPEN'}</button>`;
-  // The SITREP describes the CROSSHAIR (map centre) — the location chip already
-  // reverse-geocodes it — so "nearest", ordering, distance and direction are all
-  // measured FROM THE CROSSHAIR. It sits on you by default and after the ME
-  // button, so it reads as "from me" until you deliberately pan elsewhere; then
-  // it re-bases to the point you're inspecting (e.g. "the nearest quake to
-  // there, N of there"). Personal-safety cards below (low overflight) and the
-  // emergency-radio label stay measured from your GPS.
-  const refLat=lat, refLon=lon;
-  const dirMi=(la,lo)=>compass(bearing(refLat,refLon,la,lo))+' '+fmtMi(havKm(refLat,refLon,la,lo));
-  // bearing + range specifically from the USER (for the near-me safety cards)
-  const meMi=(la,lo)=>compass(bearing(USER.lat,USER.lon,la,lo))+' '+fmtMi(havKm(USER.lat,USER.lon,la,lo));
+  // Distance + direction are measured from the CROSSHAIR (map centre) — the
+  // location chip already reverse-geocodes it, so the whole panel describes the
+  // point you're looking at. It sits on you by default and after the ME button.
+  const dirMi=(la,lo)=>compass(bearing(lat,lon,la,lo))+' '+fmtMi(havKm(lat,lon,la,lo));
   const SWPC='https://www.swpc.noaa.gov/', SPCU='https://www.spc.noaa.gov/products/outlook/day1otlk.html';
 
-  // -- CARDS: one uniform card per category, plus a few special safety cards.
-  //    Each entry: [cls, icon, l1, l2, l3, action, hazard]. `hazard` cards
-  //    colour the SITREP title; traffic (aircraft/military) don't. --
-  const listBtn=(src,title)=>`<button class="act" data-act="list" data-src="${src}" data-title="${escapeHtml(title)}">LIST</button>`;
-  const cards=[];
-  // standard count / nearest / direction+distance+datum card for a category.
-  // Lines are kept SHORT (no overflow): scope is an icon (🌐 global / 🔭 in
-  // view) and line 2 is the nearest item bare — "nearest" is assumed.
-  function catCard(cfg){
-    const scoped=catItems(cfg,b); if(!scoped.length) return;
-    let near=null,nd=Infinity;
-    scoped.forEach(f=>{const pt=polyPt(f); if(!pt) return;
-      const d=havKm(refLat,refLon,pt[1],pt[0]); if(d<nd){nd=d;near={f,pt};}});
-    const n=scoped.length, det=near?cfg.detail(near.f):'';
-    const l1=n+' '+(n===1?cfg.one:cfg.many)+' '+(cfg.scope==='global'?'🌐':'🔭');
-    cards.push([cfg.cls?cfg.cls(scoped,b):'',cfg.icon,l1,
-      near?cfg.head(near.f):'—',
-      near?dirMi(near.pt[1],near.pt[0])+(det?' · '+det:''):'',
-      n>1?listBtn(cfg.src,l1):(near?llBtn(near.pt[0],near.pt[1]):''),
-      cfg.hazard]);
-  }
-  // LOW OVERFLIGHT — proximity safety alert (not a count): any aircraft within
-  // ~1 mile of ME and low above ground. AGL = MSL altitude − my ground elevation.
-  // < 1000' AGL → alert (amber); < 500' AGL → warning (red).
-  if(USER.lat!=null){
-    const low=[];
-    ['src-nearair','src-mil','src-sos'].forEach(s=>featsIn(s).forEach(f=>{
-      const a=+f.properties.alt; if(!isFinite(a)) return;
-      const km=havKm(USER.lat,USER.lon,f.geometry.coordinates[1],f.geometry.coordinates[0]);
-      if(km>1.609) return;                      // within one mile of me
-      low.push({f,km,agl:a-(USER.elevFt||0)});
-    }));
-    if(low.length){ low.sort((x,y)=>x.agl-y.agl); const lo=low[0];
-      if(lo.agl<1000){ const p=lo.f.properties, g=lo.f.geometry.coordinates;
-        cards.push([lo.agl<500?'danger':'alert','🛩️','LOW OVERFLIGHT',
-          low.length+' within 1 mi · '+cut(p.flight||p.type||'aircraft',10),
-          meMi(g[1],g[0])+' · '+Math.max(0,Math.round(lo.agl))+U(' ft')+' AGL',flyBtn(lo.f),true]); }
-    }
-  }
-  // hazard categories: emergencies, weather warnings, quakes, natural events, disasters
-  CATS.filter(c=>c.hazard).forEach(catCard);
+  const cards=[];   // [cls, icon, l1, l2, l3, action, hazard]
 
+  // -- GENERAL context cards (area-wide, not a single map point) go FIRST --
   // SEVERE WEATHER OUTLOOK (SPC Day 1): is the map-centre under a severe /
   // tornado risk TODAY? "Expected", not yet a warning. US only.
   const spcF=featsIn('src-spc');
   if(spcF.length){
     const tornHit=spcF.filter(f=>f.properties.kind==='torn'&&pointInFeature(f,lon,lat))
       .sort((a,b)=>(parseFloat(b.properties.code)||0)-(parseFloat(a.properties.code)||0))[0];
-    // Marginal (rank 1) and up — show it; Moderate/High (>=4) go red, the rest amber
     const catHit=spcF.filter(f=>f.properties.kind==='cat'&&f.properties.rank>=1&&pointInFeature(f,lon,lat))
       .sort((a,b)=>b.properties.rank-a.properties.rank)[0];
     if(tornHit){ const tp=parseFloat(tornHit.properties.code)||0; const red=tornHit.properties.sig||tp>=0.10;
@@ -1821,14 +1513,23 @@ async function sitrepTick(){
   if(XRAY&&/^[MX]/.test(XRAY)) cards.push([/^X/.test(XRAY)?'danger':'alert','☀','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
     'HF radio blackout risk',openBtn(SWPC,'SWPC'),true]);
 
-  // traffic categories (aircraft, military) — listed last; don't alarm the title
-  CATS.filter(c=>!c.hazard).forEach(catCard);
-
-  // MOST SEVERE FIRST: red cards, then amber, then plain — a red global
-  // disaster must outrank an uncoloured wildfire. Stable sort keeps the
-  // category order (safety → hazards → outlook → traffic) within each band.
-  const sevOf=c=>c==='danger'?0:c==='alert'?1:2;
-  cards.sort((a,z)=>sevOf(a[0])-sevOf(z[0]));
+  // -- INDIVIDUAL item cards: one per in-view feature (planes, quakes, fires,
+  //    warnings, disasters, emergencies), all interleaved and sorted by distance
+  //    to the crosshair, nearest first. Capped so a busy area can't flood it. --
+  const items=[];
+  CATS.forEach(cfg=>catItems(cfg,b).forEach(f=>{
+    const pt=polyPt(f); if(!pt) return;
+    items.push({cfg,f,pt,km:havKm(lat,lon,pt[1],pt[0])});
+  }));
+  items.sort((a,z)=>a.km-z.km);
+  const ITEM_CAP=14;
+  items.slice(0,ITEM_CAP).forEach(({cfg,f,pt})=>{
+    const det=cfg.detail?cfg.detail(f):'';
+    cards.push([cfg.cls?cfg.cls(f):'', cfg.icon,
+      cfg.head(f), (cfg.sub?cfg.sub(f):'')||'—',
+      dirMi(pt[1],pt[0])+(det?' · '+det:''),
+      llBtn(pt[0],pt[1]), cfg.hazard]);
+  });
 
   // title severity from HAZARD cards only: 0 none · 1 alert (amber) · 2 warn (red)
   let titleSev=0;
@@ -1838,27 +1539,11 @@ async function sitrepTick(){
   if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
   cards.forEach(cd=>row(cd[0],cd[1],cd[2],cd[3],cd[4],cd[5]));
 
-  // -- WORLD NEWS: conflict/disaster/politics/etc. (not map-scoped) — Wikipedia.
-  //    One blurb clamped to 3 lines; every item opens its source. --
-  if(WORLD_NEWS.length){
-    rows.push('<div class="sit-div"></div>');
-    WORLD_NEWS.forEach(n=>rows.push(
-      `<div class="sit-row"><span class="ic">${n.icon||'📰'}</span>`+
-      `<span class="tx news">${escapeHtml(n.text.slice(0,240))}</span>`+
-      `${openBtn(n.url||'https://en.wikipedia.org/wiki/Portal:Current_events',n.url?'OPEN':'MORE')}</div>`));
-  }
-
   $('#sit-body').innerHTML=rows.length?rows.join(''):
     '<div class="sit-empty">NO SIGNALS IN THIS AREA — PAN OR ZOOM THE MAP</div>';
 }
 
-// ---- list modal (roster of aircraft / military in view) ----
-function openModal(title,html){ $('#modal-title').textContent=title; $('#modal-list').innerHTML=html; $('#modal').hidden=false; }
-function closeModal(){ $('#modal').hidden=true; }
-$('#modal-x').addEventListener('click',closeModal);
-$('#modal').addEventListener('click',e=>{ if(e.target.id==='modal') closeModal(); });
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
-// shared action handler for SITREP rows AND modal rows
+// action handler for SITREP card buttons: fly to a point, or open a source page
 function handleAct(btn){
   const act=btn.dataset.act;
   if(act==='fly'&&btn.dataset.ll){
@@ -1866,13 +1551,10 @@ function handleAct(btn){
     // zoom IN to at least 9 but never zoom the user OUT of a closer view
     if(isFinite(lo)&&isFinite(la)){ cancelCenterZoom();
       gl.flyTo({center:[lo,la],zoom:Math.max(gl.getZoom(),9)}); }
-    closeModal();
     if(MQ_MOBILE.matches) openSheet('');
   } else if(act==='open'&&btn.dataset.url){ window.open(btn.dataset.url,'_blank','noopener'); }
-  else if(act==='list'){ openModal(btn.dataset.title||'LIST',catListHTML(btn.dataset.src)); }
 }
 $('#sit-body').addEventListener('click',e=>{ const b=e.target.closest('[data-act]'); if(b) handleAct(b); });
-$('#modal-list').addEventListener('click',e=>{ const b=e.target.closest('[data-act]'); if(b) handleAct(b); });
 /* =====================================================================
    7. EMERGENCY BROADCAST — NOAA WEATHER RADIO, auto-tuned (THE CORE FEATURE)
    The nearest NOAA Weather Radio (NWR All Hazards) station to the DETECTED
@@ -1992,9 +1674,7 @@ async function emergencyTune(lat,lon){
 }
 function updateEmgLabel(best){
   $('#emg-name').textContent=best.s.name;
-  // direction + range from me (fmtMi keeps units in .u, lowercase)
-  const dir=(USER.lat!=null)?compass(bearing(USER.lat,USER.lon,best.s.lat,best.s.lon))+' ':'';
-  $('#emg-sub').innerHTML=dir+fmtMi(best.km)+' away';
+  $('#emg-sub').textContent='';   // no "from me" distance
 }
 function playEmergency(s){
   audio.src=s.url;
@@ -2145,18 +1825,12 @@ gl.on('load',()=>{
   buildLayerPanel();
   bindLayerPopups();
   // Pull every layer once on load so its count is available immediately, even
-  // while hidden — EXCEPT the CelesTrak (space) layers. Fetching all three big
-  // TLE sets on every load (~5 MB) burned CelesTrak's rate budget → 403s that
-  // left Starlink stuck spinning, and queued Starlink 4s+ behind visual/gps.
-  // They now load lazily on toggle, so a shown space layer is the only request
-  // in the queue and lands fast. (started=true keeps the toggle/refresh wiring;
-  // the checkbox handler calls runLayer when the layer is switched on.)
-  LAYERS.forEach(cfg=>{ LAYER_STATE[cfg.id].started=true; if(cfg.group!=='space') scheduleLayer(cfg); });
+  // while hidden.
+  LAYERS.forEach(cfg=>{ LAYER_STATE[cfg.id].started=true; scheduleLayer(cfg); });
   refreshBase=Date.now(); setInterval(refreshTick,1000); refreshTick(); // 30s refresh + countdown
   loadEmgPool(); // warm the emergency-broadcast pool so the first fix tunes fast
-  loadKp();   setInterval(loadKp,180000);   // space weather: planetary Kp
-  loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare
-  loadWorldNews().then(sitrepTick); setInterval(()=>loadWorldNews().then(sitrepTick),2700000); // world news, 45 min
+  loadKp();   setInterval(loadKp,180000);   // space weather: planetary Kp (SITREP card)
+  loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare (SITREP card)
   setMapPadding();
   if(!MQ_MOBILE.matches) ensureFly();   // desktop: DATA panel is always visible → load canifly now
   locate();
