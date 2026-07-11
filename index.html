@@ -109,6 +109,11 @@
   #fly-pane{height:clamp(340px,52vh,520px);margin:-8px -8px 8px;
     border-bottom:1px solid var(--line);background:#000}
   #fly-frame{width:100%;height:100%;border:0;display:block;background:#000}
+  /* LAYERS label + its own 30s refresh timer (separate from canifly above) */
+  #layers-head{display:flex;align-items:center;gap:8px;margin:2px 2px 4px;
+    font-size:13px;letter-spacing:1.2px;color:var(--ink-dim);font-weight:700}
+  #layers-head .badge{margin-left:auto;font-weight:400}
+  #layers-head + .sec-h{margin-top:6px}   /* tuck the first group under the label */
 
   .sheet-grip{display:none}
   .sec-h{font-size:13px;letter-spacing:1.2px;color:var(--ink-dim);
@@ -307,13 +312,16 @@
 <!-- objects panel -->
 <div id="layers" class="panel">
   <div class="sheet-grip" data-close="layers"></div>
-  <div id="obj-head">◧ DATA <span class="badge" id="utc-badge" title="time to next data refresh" style="margin-left:auto"><b id="refresh-count">30</b>s to update</span></div>
+  <div id="obj-head">◧ DATA</div>
   <div id="layers-scroll">
     <!-- canifly drone-preflight tool, embedded live from its own repo
          (github.io/canifly) ABOVE the layer list. Loaded when the panel is first
          shown; driven by the map centre via postMessage so it tracks the
          crosshair like the SITREP does. -->
     <div id="fly-pane"><iframe id="fly-frame" title="Can I Fly? — drone preflight" allow="geolocation"></iframe></div>
+    <!-- the 30s refresh countdown lives HERE, next to the layers label, so it's
+         clear it times the map layers — not canifly, which refreshes itself -->
+    <div id="layers-head">MAP LAYERS <span class="badge" id="utc-badge" title="time to next layer refresh"><b id="refresh-count">30</b>s to update</span></div>
     <div class="sec-h">Aircraft</div><div id="grp-air"></div>
     <div class="sec-h">Maritime &amp; rail</div><div id="grp-surface"></div>
     <div class="sec-h">Space</div><div id="grp-space"></div>
