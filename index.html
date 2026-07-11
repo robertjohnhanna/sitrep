@@ -1616,11 +1616,12 @@ function aircraftListHTML(srcId){
     .map(f=>({f,km:havKm(c.lat,c.lng,f.geometry.coordinates[1],f.geometry.coordinates[0])}))
     .sort((x,y)=>x.km-y.km);
   if(!feats.length) return '<div class="sit-empty">NO AIRCRAFT IN THIS AREA</div>';
+  // minimal 3-line entry: callsign · model · distance + altitude (no buttons)
   return feats.map(({f,km})=>{ const p=f.properties;
-    const sub=[escapeHtml(p.desc||p.type||'aircraft'),p.alt+U(' ft'),p.spd+U(' kt'),(p.trk!=null?p.trk+'°':''),fmtMi(km)].filter(Boolean).join(' · ');
+    const model=escapeHtml(p.desc||p.type||'aircraft');
+    const da=fmtMi(km)+' · '+(p.alt!=null&&p.alt!=='?'?p.alt+U(' ft'):'—');
     return `<div class="mrow${p.mil?' mil':''}"><span class="ic">${p.mil?'🎖':'✈'}</span>`+
-      `<div class="mf"><b>${escapeHtml(p.flight||p.hex||'?')}</b><span>${sub}</span></div>`+
-      `<button class="act" data-act="fly" data-ll="${f.geometry.coordinates[0]+','+f.geometry.coordinates[1]}">VIEW</button></div>`;
+      `<div class="mf"><b>${escapeHtml(p.flight||p.hex||'?')}</b><span>${model}</span><span>${da}</span></div></div>`;
   }).join('');
 }
 // shared action handler for SITREP rows AND modal rows
