@@ -518,15 +518,15 @@ const escapeHtml =s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
    1. MAP — CARTO dark basemap (keyless raster tiles)
    ===================================================================== */
 // NEXRAD base-reflectivity mosaic tiles (Iowa State Mesonet, keyless). The
-// per-minute ?bust pulls the latest mosaic — the mosaic itself only updates on
-// that order, and sharing ONE bust value between the map layer and the PCPN
+// ?bust pulls the latest mosaic on the 30 s refresh pulse (tracking the "Xs to
+// update" clock); sharing ONE bust value between the map layer and the PCPN
 // sampler lets them share the browser cache instead of double-fetching tiles.
 const RADAR_URL='https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png';
-const radarBust=()=>Math.floor(Date.now()/60000);
+const radarBust=()=>Math.floor(Date.now()/30000);
 let _radarBust=radarBust();
 const RADAR_TILE=RADAR_URL+'?'+_radarBust;
 function refreshRadar(){
-  const b=radarBust(); if(b===_radarBust) return;   // same mosaic minute — nothing new
+  const b=radarBust(); if(b===_radarBust) return;   // same 30 s window — nothing new
   _radarBust=b;
   const s=gl.getSource('radar'); if(s&&s.setTiles) s.setTiles([RADAR_URL+'?'+b]);
 }
@@ -818,11 +818,11 @@ defLayer({
     // five keyless CORS feeds from the FAA org, each fail-soft (a soft failure just
     // omits its features — the canifly gate still runs its own strict query)
     const [cls,def,sua,nsufr,stad]=await Promise.all([
-      getJSON(q('Class_Airspace','NAME,CLASS,LOCAL_TYPE'),{timeout:15000}).catch(()=>null),
-      getJSON(q('National_Defense_Airspace_TFR_Areas','NAME'),{timeout:15000}).catch(()=>null),
-      getJSON(q('Special_Use_Airspace','NAME,TYPE_CODE,UPPER_VAL,LOWER_VAL'),{timeout:15000}).catch(()=>null),
-      getJSON(q('Part_Time_National_Security_UAS_Flight_Restrictions','Facility,Floor,Ceiling'),{timeout:15000}).catch(()=>null),
-      getJSON(q('Stadiums','NAME'),{timeout:15000}).catch(()=>null)]);
+      getJSON(q('Class_Airspace','NAME,CLASS,LOCAL_TYPE'),{timeout:10000}).catch(()=>null),
+      getJSON(q('National_Defense_Airspace_TFR_Areas','NAME'),{timeout:10000}).catch(()=>null),
+      getJSON(q('Special_Use_Airspace','NAME,TYPE_CODE,UPPER_VAL,LOWER_VAL'),{timeout:10000}).catch(()=>null),
+      getJSON(q('Part_Time_National_Security_UAS_Flight_Restrictions','Facility,Floor,Ceiling'),{timeout:10000}).catch(()=>null),
+      getJSON(q('Stadiums','NAME'),{timeout:10000}).catch(()=>null)]);
     const feats=[];
     // stamp a representative lon/lat on each feature so its popup can link out to
     // a sectional chart centred on the zone
@@ -891,7 +891,7 @@ defLayer({
       +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
       +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&maxAllowableOffset=${off.toFixed(5)}`
       +'&outFields=UNIT_NAME,UNIT_TYPE,UNIT_CODE&f=geojson';
-    const j=await getJSON(url,{timeout:15000});
+    const j=await getJSON(url,{timeout:10000});
     const feats=[];
     (j.features||[]).forEach(f=>{ if(!f.geometry) return; const p=f.properties||{};
       feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'nps',
@@ -1383,7 +1383,7 @@ const ALT=f=>{const a=f.properties.alt;return a!=null&&a!=='?'?a+U(' ft'):'—';
 let SOS_HEX=new Set();
 const notSos=f=>!f.properties.hex||!SOS_HEX.has(f.properties.hex);
 const CATS=[
-  {src:'sos', hazard:true, icon:'🚨', cls:()=>'danger',
+  {src:'sos', hazard:true, air:true, icon:'🚨', cls:()=>'danger',
    head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'aircraft'),
    detail:f=>'sq '+(f.properties.code||'7700')},
@@ -1395,10 +1395,10 @@ const CATS=[
    // + the card colour, so repeating it here is noise). '' if no end time known.
    detail:f=>{const e=f.properties.ends,d=e&&new Date(e);
      return d&&!isNaN(d)?'til '+d.toLocaleTimeString([],Object.assign({hour:'numeric',minute:'2-digit'},tzOpt())):'';}},
-  {src:'nearair', hazard:false, icon:'✈️', cls:()=>'', filter:notSos,
+  {src:'nearair', hazard:false, air:true, icon:'✈️', cls:()=>'', filter:notSos,
    head:f=>cut(f.properties.flight||f.properties.hex||'?',12),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'aircraft'), detail:ALT},
-  {src:'mil', hazard:false, icon:'🪖', cls:()=>'alert', filter:notSos,
+  {src:'mil', hazard:false, air:true, icon:'🪖', cls:()=>'alert', filter:notSos,
    head:f=>cut(f.properties.flight||f.properties.hex||'?',10),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'military'), detail:ALT},
   // FAA airspace RESTRICTIONS — each in-view zone is a distance-sorted, tappable
@@ -1487,35 +1487,29 @@ function sitrepTick(){
 
   const cards=[];   // [cls, icon, l1, l2, l3, action, hazard]
 
-  // -- LOW AIRCRAFT PROXIMITY (top, red-title): any plane (civil / military /
-  //    emergency) inside the RANGE setting AND under the WARN_AGL_FT (1,000')
-  //    warning altitude → danger card. planesNear() is the SAME deduped
-  //    collector that drives the chart's TRFC cells, so the card and the chart
-  //    always agree. Reported altitude is barometric (MSL), so we look up the
-  //    ground elevation at the crosshair (cached, keyless Open-Meteo) and
-  //    subtract it: AGL = alt − ground (crosshair ground ≈ plane ground at
-  //    these radii). Recomputed every SITREP tick for the planes currently in
-  //    the radius. Ground aircraft report alt='ground'/'?' → skipped. --
-  const inRing=planesNear(lat,lon,rangeKm);
-  let acFlash=false, haloFeats=[];   // breaching aircraft → title/card/map flash
-  if(inRing.length){
-    const ground=groundElevFt(lat,lon);          // ft AMSL, null until fetched
-    const lowAc=inRing.map(a=>({...a,agl:ground==null?a.alt:a.alt-ground}))
-                      .filter(a=>a.agl<WARN_AGL_FT);
-    if(lowAc.length){
-      acFlash=true;
-      haloFeats=lowAc.map(a=>({type:'Feature',
-        geometry:{type:'Point',coordinates:a.pt},properties:{}}));
-      lowAc.sort((a,z)=>a.km-z.km); const lo=lowAc[0], p=lo.f.properties;
-      const aglTxt=Math.max(0,Math.round(lo.agl))+U(' ft')+(ground==null?'':' AGL');
-      cards.push(['danger','🛩️','LOW AIRCRAFT',
-        cut(p.flight||p.hex||'aircraft',12)+(lowAc.length>1?' +'+(lowAc.length-1):''),
-        dirMi(lo.pt[1],lo.pt[0])+' · '+aglTxt,
-        llBtn(lo.pt[0],lo.pt[1]), true, /*flash*/true]);
-    }
-  }
-  // drive the pulsing map halo(s) at the breaching aircraft (empty = cleared)
-  setAcAlert(haloFeats);
+  // -- LOW AIRCRAFT BREACH: a plane (civil / military / emergency) inside the
+  //    RANGE setting AND under the WARN_AGL_FT (1,000') warning altitude. Rather
+  //    than a separate pinned card, the plane's OWN card (below) transforms into
+  //    the red flashing LOW AIRCRAFT alert while it breaches, and reverts to the
+  //    normal plane card when it climbs out / leaves — always exactly ONE card
+  //    per plane. planesNear() is the SAME deduped collector that drives the
+  //    chart's TRFC cells, so card, chart and halo always agree. Reported
+  //    altitude is barometric (MSL): ground elevation at the crosshair (cached,
+  //    keyless Open-Meteo) is subtracted for AGL (crosshair ground ≈ plane
+  //    ground at these radii). breachInfo maps a plane's hex/callsign → its AGL
+  //    label; the item loop reads it. Ground aircraft (alt='ground'/'?') skip. --
+  const acGround=groundElevFt(lat,lon);          // ft AMSL at crosshair, null until fetched
+  const breachers=planesNear(lat,lon,rangeKm)
+    .map(a=>({...a,agl:acGround==null?a.alt:a.alt-acGround}))
+    .filter(a=>a.agl<WARN_AGL_FT);
+  const acKey=p=>p.hex||p.flight||'';
+  const breachInfo=new Map();   // key → AGL label ('254 ft AGL' / '254 ft' if ground unknown)
+  breachers.forEach(a=>breachInfo.set(acKey(a.f.properties),
+    Math.max(0,Math.round(a.agl))+U(' ft')+(acGround==null?'':' AGL')));
+  const acFlash=breachers.length>0;
+  // pulsing map halo(s) at the breaching aircraft (empty = cleared)
+  setAcAlert(breachers.map(a=>({type:'Feature',
+    geometry:{type:'Point',coordinates:a.pt},properties:{}})));
 
   // -- GENERAL context cards (area-wide, not a single map point). Collected here
   //    but appended at the BOTTOM of the pile (after the distance-sorted items) —
@@ -1560,18 +1554,26 @@ function sitrepTick(){
     // airspace card takes you to the nearest edge near you, even when you're
     // standing inside it (inside still sorts to the top / reads "overhead").
     const inside=g.type!=='Point'&&pointInFeature(f,lon,lat);
-    let cls=cfg.cls?cfg.cls(f):'', det=null;
+    let cls=cfg.cls?cfg.cls(f):'', det=null, headOv=null, subOv=null, icOv=null, flash=false, hazardOv=null;
+    // BREACHING aircraft: this plane's own card BECOMES the LOW AIRCRAFT alert
+    // (red, flashing) while it's low + in range; it reverts automatically once
+    // it's no longer in breachInfo. One card per plane, never two.
+    if(cfg.air && breachInfo.has(acKey(f.properties))){
+      cls='danger'; flash=true; hazardOv=true; icOv='🛩️';
+      headOv='LOW AIRCRAFT'; subOv=cut(f.properties.flight||f.properties.hex||'aircraft',12);
+      det=breachInfo.get(acKey(f.properties));
+    }
     // OVERHEAD controlled airspace: colour + label it by the real LAANC ceiling.
-    if(cfg.ctrl&&inside&&aspCap!=null){
+    else if(cfg.ctrl&&inside&&aspCap!=null){
       // line 3 already reads "overhead · …", so det is just the consequence
       if(aspCap<0){ cls='danger'; det='no-fly'; }
       else if(aspCap<SPEC.regFt){ cls='alert'; det='ceiling '+aspCap+U(' ft'); }
     }
-    // colour drives tier so a red "no-fly overhead" sorts up with the hazards;
-    // everything else keeps its original hazard/neutral tier.
-    const tier=(cfg.ctrl&&(cls==='danger'||cls==='alert'))
-      ? (cls==='danger'?0:1)
-      : (cfg.hazard?(cls==='danger'?0:1):2);
+    // colour drives tier so a breaching plane / "no-fly overhead" sorts up with
+    // the hazards; everything else keeps its original hazard/neutral tier.
+    const tier=flash?0
+      :(cfg.ctrl&&(cls==='danger'||cls==='alert')) ? (cls==='danger'?0:1)
+      :(cfg.hazard?(cls==='danger'?0:1):2);
     let pt, km;
     if(g.type==='Point'){ pt=g.coordinates; km=havKm(lat,lon,pt[1],pt[0]); }
     else {
@@ -1579,7 +1581,7 @@ function sitrepTick(){
       pt=ne.pt; km=inside?0:ne.km;
     }
     if(!pt) return;
-    items.push({cfg,f,pt,cls,tier,inside,km,det});
+    items.push({cfg,f,pt,cls,tier,inside,km,det,headOv,subOv,icOv,flash,hazardOv});
   }));
   // A named airspace zone (esp. Class B) arrives as many same-name shelf
   // polygons — collapse them to the NEAREST single card per class+name.
@@ -1590,13 +1592,14 @@ function sitrepTick(){
   const shown=items.filter(it=>it.cfg.src!=='airspace'||nearestAsp.get(aspKey(it))===it);
   shown.sort((a,z)=>a.tier-z.tier||a.km-z.km);
   const ITEM_CAP=14;
-  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,det})=>{
+  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,det,headOv,subOv,icOv,flash,hazardOv})=>{
     const detTxt=det!=null?det:(cfg.detail?cfg.detail(f):'');
-    const ic=typeof cfg.icon==='function'?cfg.icon(f):cfg.icon;
-    cards.push([cls, ic,
-      cfg.head(f), (cfg.sub?cfg.sub(f):'')||'—',
+    const ic=icOv!=null?icOv:(typeof cfg.icon==='function'?cfg.icon(f):cfg.icon);
+    const head=headOv!=null?headOv:cfg.head(f);
+    const sub=subOv!=null?subOv:((cfg.sub?cfg.sub(f):'')||'—');
+    cards.push([cls, ic, head, sub,
       (inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:''),
-      llBtn(pt[0],pt[1]), cfg.hazard]);
+      llBtn(pt[0],pt[1]), hazardOv!=null?hazardOv:cfg.hazard, flash?true:undefined]);
   });
   general.forEach(c=>cards.push(c));   // area-wide context cards sink to the bottom
   cards.push(wxCard());                // weather forecast — always the bottom card
@@ -1666,7 +1669,7 @@ function refreshViewport(){
     // NOW column computed for the NEW crosshair — never the previous one.
     flyOnMove();
     scheduleSitrep();
-  },450);
+  },250);   // snappy: refetch the new area's data promptly after a pan/zoom settles
 }
 gl.on('moveend',refreshViewport);
 // container resize doesn't reliably fire moveend, so refetch here too
@@ -1763,7 +1766,7 @@ async function retry(fn,tries=3,baseMs=600){
 // Open-Meteo: surface + winds aloft (height levels through the FAA band), gusts,
 // visibility, per-level cloud cover/height. One row per grid column.
 async function getAloft(lat,lon){
-  const d=await getJSON(aloftUrl(lat,lon),{timeout:15000});
+  const d=await getJSON(aloftUrl(lat,lon),{timeout:10000});
   let i=0;
   if(d.current?.time&&d.hourly?.time){const now=d.current.time.slice(0,13);i=d.hourly.time.findIndex(t=>t.slice(0,13)===now);if(i<0)i=0;}
   const H=d.hourly||{}, elev=d.elevation??0;
@@ -1799,7 +1802,7 @@ async function getAloft(lat,lon){
 // hour can pick the value in force when it arrives (bins are 3-hourly — the
 // +3h column can cross TWO bin boundaries, so "current + next" isn't enough).
 async function getKp(){
-  const d=await getJSON(KP_URL,{timeout:9000});
+  const d=await getJSON(KP_URL,{timeout:7000});
   if(!Array.isArray(d)||d.length===0) return null;
   const arrHdr=Array.isArray(d[0]);       // products feed = array rows w/ header
   const src=arrHdr?d.slice(1):d;
@@ -1813,7 +1816,7 @@ async function getKp(){
 // range forces 0 (no-fly). A LEGAL warning, so anything that could quietly
 // understate a restriction THROWS (→ amber via fail-open), never reads "clear".
 async function getAirspace(lat,lon,rng){
-  const [grid,def]=await Promise.all([ getJSON(aspUrl(lat,lon,rng),{timeout:9000}), getJSON(defUrl(lat,lon,rng),{timeout:9000}) ]);
+  const [grid,def]=await Promise.all([ getJSON(aspUrl(lat,lon,rng),{timeout:7000}), getJSON(defUrl(lat,lon,rng),{timeout:7000}) ]);
   if(grid.error||!Array.isArray(grid.features)) throw new Error('airspace grid query failed');
   if(def.error ||!Array.isArray(def.features))  throw new Error('defense-airspace query failed');
   if(grid.exceededTransferLimit||def.exceededTransferLimit) throw new Error('airspace result truncated');
@@ -2154,12 +2157,30 @@ async function flyRefresh(){
     const age=cc!=null?Date.now()-cc.ts:Infinity;
     const fresh=matches&&age<ASP_TTL;
     const kpKeep=FLY.data!=null&&FLY.data.kp!=null&&Date.now()-flyKpAt<170000;
-    const [aloft,kpRaw,aspRaw,precip]=await Promise.all([
-      retry(()=>getAloft(base.lat,base.lon)).catch(()=>null),
-      kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp()).catch(()=>null),
-      fresh?Promise.resolve({ceilFt:cc.ceilFt}):retry(()=>getAirspace(base.lat,base.lon,rngMi)).catch(()=>null),
-      retry(()=>sampleRadarPrecip(base.lat,base.lon,rngMi),2).catch(()=>null),
-    ]);
+    // Fire all four in parallel, but DON'T let the slow FAA airspace query block
+    // the chart: await weather FIRST and paint immediately (reusing the last-good
+    // gates), then fold in airspace / Kp / radar as each lands. Airspace is a
+    // single attempt (it's cached 6 h + fail-open) so it can never hang the grid.
+    const pAloft = retry(()=>getAloft(base.lat,base.lon),2).catch(()=>null);
+    const pKp    = kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp(),2).catch(()=>null);
+    const pAsp   = fresh?Promise.resolve({ceilFt:cc.ceilFt}):getAirspace(base.lat,base.lon,rngMi).catch(()=>null);
+    const pPrecip= retry(()=>sampleRadarPrecip(base.lat,base.lon,rngMi),2).catch(()=>null);
+
+    const aloft=await pAloft;
+    if(aloft){
+      // paint the winds/gust grid NOW with the last-good gates; the fresh gates
+      // (below) repaint again when they arrive — no waiting on the FAA service.
+      // Any gate we DON'T yet have a value for stays flagged unknown, so the NOW
+      // header ambers "unverified" rather than showing a falsely-clear 400.
+      FLY.data={lat:base.lat,lon:base.lon,aloft,
+        kp:(FLY.data&&FLY.data.kp)||null, asp:(FLY.data&&FLY.data.asp)||null};
+      FLY.err.om=false; FLY.err.asp=FLY.data.asp==null; FLY.err.kp=FLY.data.kp==null;
+      flyPaint(); scheduleSitrep();
+    }else{
+      FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
+    }
+
+    const [kpRaw,aspRaw,precip]=await Promise.all([pKp,pAsp,pPrecip]);
     if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();   // a genuinely fresh Kp resets its clock
     // Kp fetch failed: fall back to the recent last-good value rather than losing
     // the gate to one blip; beyond KP_STALE_MS stay null and amber (unknown ≠ calm).
@@ -2175,7 +2196,6 @@ async function flyRefresh(){
       FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
       FLY.err.om=false; FLY.err.asp=asp==null;
     }else{
-      FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
       if(FLY.data){ FLY.data.kp=kp; if(asp!=null){ FLY.data.asp=asp; FLY.err.asp=false; } }
     }
     FLY.err.kp=kp==null;

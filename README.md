@@ -62,10 +62,12 @@ range ring. Cards are tiered — red hazards, amber hazards, then routine
 traffic — and distance-sorted within each tier (capped at 14, plus pinned and
 context cards):
 
-- 🛩️ **LOW AIRCRAFT** (pinned top) — any plane in range under 1,000 ft AGL
-  (AGL = barometric altitude − ground elevation at the crosshair). The same
-  deduped collector feeds the chart's TRFC cells, so card and chart always
-  agree.
+- 🛩️ **LOW AIRCRAFT** — when a plane is in range **and** under 1,000 ft AGL
+  (AGL = barometric altitude − ground elevation at the crosshair), that
+  plane's own card transforms into the red flashing LOW AIRCRAFT alert and
+  sorts to the top; it reverts to the normal ✈️/🪖/🚨 card the moment it
+  climbs out or leaves. Always exactly one card per plane. The same deduped
+  collector feeds the chart's TRFC cells, so card, chart and map halo agree.
 - 🚨 emergency squawks (7700/7600/7500) · ⚠️ NWS **warnings** (not watches) ·
   ⛔/⚠️ FAA restrictions (defense, prohibited, security, MOA, stadium…) ·
   🏞️ NPS land · 🗼 controlled airspace (Class B/C/D/E — neutral
