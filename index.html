@@ -1762,7 +1762,12 @@ function sitrepTick(){
     // can't disagree. cls drives tier so a breaching plane sorts up with the
     // hazards; everything else (incl. all tracked grey-ring traffic) keeps its
     // hazard/neutral tier — distance sorts within each.
-    const tier=flash?0:(cfg.hazard?(cls==='danger'?0:1):2);
+    // The effective hazard uses the per-card override (hazardOv) when set, so an
+    // AMBER low-aircraft card (hazardOv=true, cls='alert') tiers as an amber hazard
+    // (tier 1 — just below the red flashing tier) instead of routine traffic, and so
+    // survives the card cap and raises the CANIFLY title to amber.
+    const hazard=hazardOv!=null?hazardOv:cfg.hazard;
+    const tier=flash?0:(hazard?(cls==='danger'?0:1):2);
     let pt, km;
     if(g.type==='Point'){ pt=g.coordinates; km=havKm(lat,lon,pt[1],pt[0]); }
     else {
@@ -2295,6 +2300,13 @@ function flyComputeDetail(){
     }
     // manned traffic caps the NOW column only (it's a live snapshot, like radar)
     const tCeil = n===0 ? trafficCeil : Infinity;
+    // TRFC is ALSO surfaced as its own flashing marker (trfcAlt) so intruding
+    // low traffic is ALWAYS visible on the chart — even when a lower or grounding
+    // gate (FAA / weather) owns the column's single binding-reason cell. The marker
+    // sits at the first no-go band above the traffic ceiling (surface when the plane
+    // is low enough to ground the column). Only NOW carries live traffic.
+    const trfcAlt = (n===0 && trafficCeil!==Infinity)
+      ? (trafficCeil<0 ? 0 : Math.min(SPEC.regFt, trafficCeil+50)) : null;
     const capFt=Math.min(SPEC.regFt, cloudCapFt, windCeilFt, aspCapFt, tCeil);
     const grounded=globalGrounded||capFt<0;
     let maxFly=-1;
@@ -2318,7 +2330,7 @@ function flyComputeDetail(){
     }else if(maxFly<SPEC.regFt){
       reasonAlt=maxFly+50; reason=capSrc;
     }
-    return {n,prof,gustKt:c.gustKt,capFt,maxFly,grounded,reason,reasonAlt};
+    return {n,prof,gustKt:c.gustKt,capFt,maxFly,grounded,reason,reasonAlt,trfcAlt};
   });
   const cellState=(g,ft)=>{
     if(g.grounded) return 'bad';
@@ -2343,6 +2355,9 @@ function flyComputeDetail(){
       // the column's own cap code wins its cell; the TRFC ceiling flashes red/white
       // (matching the LOW AIRCRAFT alert), every other cap code is static.
       if(g.reasonAlt===ft) return {v:g.reason, st:cellState(g,ft), rsn:true, flash:g.reason==='TRFC'};
+      // the independent TRFC traffic marker: flashes at the traffic ceiling even when
+      // another gate owns the binding-reason cell (so a low plane is always shown).
+      if(g.trfcAlt===ft) return {v:'TRFC', st:cellState(g,ft), rsn:true, flash:true};
       return {v:one(g.prof(ft)), st:cellState(g,ft)};
     });
     // hi = the bold "highest you can fly right now" label (the top green row)
@@ -2364,7 +2379,7 @@ function flyComputeDetail(){
     // wxNow: the NOW-column weather gates (gust/vis/precip + wind & cloud ceilings)
     // — the SITREP weather card reads these so card + chart NOW column agree.
     wxNow,
-    grid:grid.map(g=>({n:g.n,maxFly:g.maxFly,grounded:g.grounded,reason:g.reason,reasonAlt:g.reasonAlt}))};
+    grid:grid.map(g=>({n:g.n,maxFly:g.maxFly,grounded:g.grounded,reason:g.reason,reasonAlt:g.reasonAlt,trfcAlt:g.trfcAlt}))};
 }
 
 const FLY_GRID_ATTRS='class="grid"';

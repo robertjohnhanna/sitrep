@@ -41,7 +41,7 @@ code in the cell where the limit bites:
 | FAA | LAANC grid ceiling caps the band; a National-Defense TFR in range grounds | FAA ArcGIS (point + range buffer) |
 | PROH / NSUF / PARK | Prohibited area, security UAS zone, or NPS land under the crosshair grounds | FAA ArcGIS · NPS |
 | PCPN | NEXRAD echo inside the 1 mi range ring grounds NOW | Iowa State Mesonet mosaic (pixel-sampled) |
-| TRFC | a low manned aircraft **inside the 1 mi range ring** caps the NOW column: the drone must stay 500 ft below it (§91.119 min altitude), so it flashes red/white at that ceiling and reds every row above | ADS-B |
+| TRFC | a low manned aircraft **inside the 1 mi range ring** caps the NOW column: the drone must stay 500 ft below it (§91.119 min altitude), so it flashes red/white at that ceiling and reds every row above. It's shown as its **own flashing marker** — so the traffic is always visible even when a lower or grounding gate (FAA / weather) also limits the column | ADS-B |
 
 **Fail-safe posture:** a feed that can't be verified never silently reads
 "clear". Unknown inputs fail *open* for the grid values but amber the NOW
@@ -83,12 +83,13 @@ context cards):
   grey ring** (the light-grey dotted ring) as an ordinary, distance-sorted card,
   so you see traffic approaching well before it's overhead. A plane **under the
   warning altitude** escalates in two tiers by where it is: out in the grey ring
-  it's an **amber** LOW AIRCRAFT heads-up card; **inside the 1 mi red range ring**
-  it becomes the **red flashing** LOW AIRCRAFT alert — sorts to the top, pulses a
-  halo on the map, flashes the SITREP title, and caps the chart's TRFC ceiling.
-  Either way it's the plane's *own* card transforming (exactly one card per plane,
-  never two), reverting to a normal card the moment it climbs out or leaves the
-  grey ring. The warning altitude is the **400 ft
+  it's an **amber** LOW AIRCRAFT heads-up card — it sorts **just below the red
+  hazards** (above routine traffic) and ambers the CANIFLY title; **inside the 1 mi
+  red range ring** it becomes the **red flashing** LOW AIRCRAFT alert — sorts to
+  the top, pulses a halo on the map, flashes the SITREP title, and caps the chart's
+  TRFC ceiling. Either way it's the plane's *own* card transforming (exactly one
+  card per plane, never two), reverting to a normal card the moment it climbs out
+  or leaves the grey ring. The warning altitude is the **400 ft
   drone ceiling + 500 ft separation = 900 ft AGL** (AGL = QNH-corrected altitude −
   ground elevation under that plane; see below): a plane below that pushes its
   required-clearance floor into the drone band. Part 107 sets no *numeric*
