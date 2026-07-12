@@ -189,22 +189,27 @@
   @keyframes sl{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
   @keyframes sp{to{transform:rotate(360deg)}}
   /* ---------- SITREP briefing panel (right side) ---------- */
-  #sit-head{display:flex;align-items:center;gap:8px;padding:9px 12px;
+  #sit-head{display:flex;align-items:center;gap:8px;padding:9px 12px;position:relative;
     border-bottom:1px solid var(--line);flex:0 0 auto;min-height:48px}
   #sit-head .title{color:var(--accent);font-size:13px;letter-spacing:2px;font-weight:700;
     flex:0 0 auto}
   /* title severity — defined AFTER .title so they win on colour without
-     !important (which would otherwise beat the acflash animation below) */
-  #sit-title.alert{color:var(--warn)}
-  #sit-title.warn{color:var(--danger)}
+     !important (which would otherwise beat the acflash animation below). Applied
+     to .title so BOTH the CANIFLY title and the centred max-altitude readout
+     share the exact same verdict colour + flash logic. */
+  #sit-head .title.alert{color:var(--warn)}
+  #sit-head .title.warn{color:var(--danger)}
+  /* the centred current-max-altitude readout — same font/colour as the title */
+  #maxalt{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    pointer-events:none;white-space:nowrap}
   /* EXTRA ALERT — an aircraft breaching the range+altitude threshold flashes the
      SITREP title, its card headline, its map halo AND the chart's TRFC cell(s)
      between red and white (a TRFC cell only appears while a plane breaches). */
   @keyframes acflash{0%,100%{color:var(--danger)}50%{color:#fff}}
-  #sit-title.acflash,.sit-row.acflash .s1,#fly-pane .gc.acflash{
+  #sit-head .title.acflash,.sit-row.acflash .s1,#fly-pane .gc.acflash{
     animation:acflash .9s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){
-    #sit-title.acflash,.sit-row.acflash .s1,#fly-pane .gc.acflash{animation:none}}
+    #sit-head .title.acflash,.sit-row.acflash .s1,#fly-pane .gc.acflash{animation:none}}
   /* Combined control: range steppers + center-on-me, in one box styled like the
      original center-on-me button but WHITE, not accent green (white border, text,
      glyphs; dark blurred bg; 42px tall). Layout: (−) RANGE ⌖ n.n MI (+). Centred
@@ -335,6 +340,7 @@
 <div id="sitrep" class="panel">
   <div id="sit-head">
     <span class="title" id="sit-title">◈ CANIFLY</span>
+    <span class="title" id="maxalt" title="highest flyable altitude now" aria-label="current maximum flyable altitude">—</span>
     <button id="refresh-badge" class="rdial" type="button" title="tap to refresh · auto every 15 s" aria-label="refresh data now">
       <span class="rdial-prog"></span>
       <svg class="rdial-ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v4h-4"/></svg>
@@ -1873,9 +1879,15 @@ function sitrepTick(){
   if(g0) titleSev=g0.grounded?2:(g0.maxFly<SPEC.regFt?1:0);
   if(FLY.detail&&flyUnknown().length) titleSev=Math.max(titleSev,1);
   cards.forEach(cd=>{ if(cd[6]) titleSev=Math.max(titleSev,cd[0]==='danger'?2:cd[0]==='alert'?1:0); });
-  const t=$('#sit-title'); t.classList.remove('warn','alert');
-  if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
-  t.classList.toggle('acflash',acFlash);   // breaching aircraft → flash the title red/white
+  // The centred readout shows the current highest flyable altitude (grounded → 0);
+  // it shares the verdict colour + breach-flash logic with the CANIFLY title.
+  const ma=$('#maxalt');
+  if(ma) ma.textContent = g0 ? Math.max(0,g0.maxFly)+' FT' : '—';
+  [$('#sit-title'), ma].forEach(t=>{ if(!t) return;
+    t.classList.remove('warn','alert');
+    if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
+    t.classList.toggle('acflash',acFlash);   // breaching aircraft → flash red/white
+  });
   // the map range ring AND the range control (its outline + the RANGE / miles
   // text) both track the SITREP title severity: green clear / amber reduced-or-
   // unverified / red grounded (same 0·1·2 the title colour uses). The control

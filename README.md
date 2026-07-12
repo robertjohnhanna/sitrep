@@ -52,7 +52,10 @@ unverified past a short grace window, a **📡 DATA card** spells out which feed
 are stale (see the SITREP cards) — amber while the chart still renders from
 last-good data, red when there's no verdict at all.
 
-The bold altitude label marks the highest currently flyable row. **Max wind**
+The bold altitude label marks the highest currently flyable row, and the CANIFLY
+title bar carries the same number centered as a **current-max-altitude readout**
+(e.g. `250 FT`, `0 FT` when grounded) in the same font and verdict colour as the
+CANIFLY title — green clear, amber capped, red grounded. **Max wind**
 (±1 mph) is set in the **settings box** below the chart; **range** (±0.5 mi,
 0.5–15) has its own stepper in the floating control at the **bottom-centre of the
 map** — `(−) RANGE ⌖ n.n MI (+)`, which also holds the center-on-me (⌖) button.
