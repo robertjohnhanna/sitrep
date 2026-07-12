@@ -59,6 +59,9 @@ map** — `(−) RANGE ⌖ n.n MI (+)`, which also holds the center-on-me (⌖) 
 Both settings are persisted per device. Range drives the FAA query radius, the
 traffic/radar sweep, the SITREP card radius, and the dashed **range ring** drawn
 around the crosshair. Zoom is capped so the ring never exceeds ⅓ of the view.
+Both the range ring and the range control's own outline are tinted to the
+current verdict — green clear, amber reduced/unverified, red grounded — so the
+one-glance colour reaches the map even when the panel is off-screen.
 
 ## The SITREP cards
 
@@ -169,7 +172,9 @@ detail.
 map** to bring the panel up; **tap the flyability chart** (or any card) to drop
 back to the map. No drag, no snap points — one tap flips the page, and each page
 gets the whole screen. The panel uses the dynamic viewport height so it never
-spills below Safari's address bar.
+spills below Safari's address bar. This two-page toggle is **portrait-only** — a
+phone in **landscape** is wide enough for the docked-right panel, so it falls
+through to the same layout as a tablet or desktop.
 
 ## Location & privacy
 

@@ -84,7 +84,7 @@
   .panel{position:absolute;z-index:15;background:var(--panel);
     backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     display:flex;flex-direction:column;overflow:hidden}
-  #sitrep{top:0;right:0;left:auto;width:320px;bottom:0;
+  #sitrep{top:0;right:0;left:auto;width:360px;bottom:0;
     padding-right:var(--sa-r);border:1px solid var(--line)}
   /* data-refresh countdown on the SITREP title line, right-justified. Tapping it
      forces an immediate refresh, so it reads as a control. */
@@ -200,7 +200,7 @@
      320px panel on desktop; full width on mobile) and centres the box, with
      pointer-events passing through the wrap so only the box is interactive. */
   #ctrl-wrap{position:absolute;z-index:16;left:calc(16px + var(--sa-l));
-    right:calc(336px + var(--sa-r));bottom:16px;display:flex;justify-content:center;
+    right:calc(376px + var(--sa-r));bottom:16px;display:flex;justify-content:center;
     pointer-events:none}
   #ctrlbar{pointer-events:auto;height:42px;display:flex;align-items:center;gap:7px;padding:0 9px;
     background:var(--panel);border:1px solid #fff;border-radius:9px;
@@ -279,8 +279,10 @@
     border:2.5px solid #fff;box-shadow:0 0 0 0 rgba(47,224,122,.6);animation:pulse 2.2s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,224,122,.6)}70%{box-shadow:0 0 0 16px rgba(47,224,122,0)}100%{box-shadow:0 0 0 0 rgba(47,224,122,0)}}
 
-  /* ---------- mobile: two full-screen pages, map ⇄ panel ---------- */
-  @media (max-width:1000px){
+  /* ---------- mobile PORTRAIT: two full-screen pages, map ⇄ panel ----------
+     Landscape (even on a phone) is wide enough for the docked-right panel, so it
+     deliberately falls through to the desktop layout above. */
+  @media (max-width:1000px) and (orientation:portrait){
     #map{bottom:0}
     /* The CANIFLY panel is a full-screen page that slides up over the map.
        Hidden by default (the map is page one); body.panel-open slides it in.
@@ -363,10 +365,12 @@
    ===================================================================== */
 const $ = s => document.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
-// SINGLE mobile breakpoint, matching the CSS @media (max-width:1000px). Every
+// SINGLE mobile breakpoint, matching the CSS @media below. The two-page toggle is
+// PORTRAIT-only: a phone in landscape is wide enough for the docked-right panel
+// (like a tablet/desktop), so landscape falls through to the docked layout. Every
 // JS layout decision reads this — a 900/1000 mix once left the 901–1000px range
 // with sheet panels but desktop map padding.
-const MQ_MOBILE=window.matchMedia('(max-width:1000px)');
+const MQ_MOBILE=window.matchMedia('(max-width:1000px) and (orientation:portrait)');
 function toast(msg){
   const t=el('div','tmsg',msg);
   $('#toast').appendChild(t);
@@ -1263,11 +1267,11 @@ $('#loc-btn').addEventListener('click',centerOnMe);
 // docked SITREP panel (desktop only; on mobile the panel is an overlay sheet).
 let _pad=null;
 function setMapPadding(){
-  // the SITREP panel is docked right (320px) — keep map content centred in the
+  // the SITREP panel is docked right (360px) — keep map content centred in the
   // area to its left; on mobile the panel is an overlay sheet so no padding.
   const p=MQ_MOBILE.matches
     ? {top:0,right:0,bottom:0,left:0}
-    : {top:20,left:24,right:336,bottom:24};
+    : {top:20,left:24,right:376,bottom:24};
   if(_pad&&_pad.top===p.top&&_pad.left===p.left&&_pad.right===p.right&&_pad.bottom===p.bottom) return;
   _pad=p; gl.setPadding(p);   // only when it actually changed — avoids needless camera nudges
 }
@@ -1720,9 +1724,12 @@ function sitrepTick(){
   const t=$('#sit-title'); t.classList.remove('warn','alert');
   if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
   t.classList.toggle('acflash',acFlash);   // breaching aircraft → flash the title red/white
-  // the map range ring tracks the SITREP title severity: green clear / amber
-  // reduced-or-unverified / red grounded (same 0·1·2 the title colour uses)
-  if(gl.getLayer('ly-ring')) gl.setPaintProperty('ly-ring','line-color',SEV_COL[titleSev]||SEV_COL[0]);
+  // the map range ring AND the range control's outline both track the SITREP
+  // title severity: green clear / amber reduced-or-unverified / red grounded
+  // (same 0·1·2 the title colour uses)
+  const sevCol=SEV_COL[titleSev]||SEV_COL[0];
+  if(gl.getLayer('ly-ring')) gl.setPaintProperty('ly-ring','line-color',sevCol);
+  const cbar=$('#ctrlbar'); if(cbar) cbar.style.borderColor=sevCol;
   cards.forEach(cd=>row(cd[0],cd[1],cd[2],cd[3],cd[4],cd[5],cd[7],cd[8]));
 
   // the weather card is always appended, so there's always at least one row
