@@ -1379,20 +1379,22 @@ function setLocIcon(locked){
   b.title=locked?'following your location — tap to unlock':'center map on my location';
   b.setAttribute('aria-label',locked?'unlock location follow':'center on my location');
 }
-// The ⌖ button cycles: CENTER (pan to me, keep zoom) → LOCK (map follows the live
-// fix; icon → padlock) → UNLOCK (stop following; icon → crosshair) → repeat. When
-// there's no fix yet, the first tap just kicks off location.
-// locMode: 0 idle · 1 centered · 2 locked (following).
+// The ⌖ button cycles: CENTER (pan to me, keep zoom) → LOCK (crosshair STUCK on
+// the live fix; icon → padlock) → UNLOCK (release; icon → crosshair) → repeat.
+// Locking disables map panning so the crosshair can't be dragged off you — zoom
+// still works; unlocking re-enables the drag. No fix yet → first tap kicks off
+// location. locMode: 0 idle · 1 centered · 2 locked (following).
 let locMode=0;
+function setPanLock(on){ try{ on?gl.dragPan.disable():gl.dragPan.enable(); }catch(e){} }
 function centerOnMe(){
   if(USER.lat==null){ toast('LOCATING…'); locate(); return; }
-  if(locMode===2){                 // LOCKED → unlock (leave the map where it is)
-    locMode=0; setLocIcon(false); return;
+  if(locMode===2){                 // LOCKED → unlock (release the map)
+    locMode=0; setLocIcon(false); setPanLock(false); return;
   }
   cancelCenterZoom();
   gl.easeTo({center:[USER.lon,USER.lat],duration:locMode?400:800});   // snap to me, keep zoom
   if(locMode===0){ locMode=1; }    // idle → centered
-  else { locMode=2; setLocIcon(true); }   // centered → lock + follow
+  else { locMode=2; setLocIcon(true); setPanLock(true); }   // centered → lock: crosshair stuck on you
 }
 $('#loc-btn').addEventListener('click',centerOnMe);
 
