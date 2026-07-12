@@ -216,38 +216,33 @@
   .sit-row.acflash .s1{animation:acflash .9s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){
     #sit-title.acflash,.sit-row.acflash .s1{animation:none}}
-  /* center-on-me: floating control at the bottom-right corner of the map
-     (the open area sits just left of the 320px right panel) */
-  #loc-btn{position:absolute;z-index:16;right:calc(334px + var(--sa-r));bottom:16px;
-    width:42px;height:42px;padding:0;font-size:20px;line-height:1;
-    background:var(--panel);border:1px solid var(--accent);color:var(--accent);border-radius:9px;
-    display:flex;align-items:center;justify-content:center;
+  /* Combined bottom-right control: range steppers + center-on-me, in one box
+     styled like the original center-on-me button (accent border, dark blurred
+     bg, 42px tall, same corner). Layout: (−) RANGE ⌖ n.n MI (+). */
+  #ctrlbar{position:absolute;z-index:16;right:calc(334px + var(--sa-r));bottom:16px;
+    height:42px;display:flex;align-items:center;gap:7px;padding:0 9px;
+    background:var(--panel);border:1px solid var(--accent);border-radius:9px;
+    color:var(--accent);font-family:var(--mono);font-size:13px;font-weight:700;
     backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  #ctrlbar .cb-label{letter-spacing:1px;font-weight:800}
+  #ctrlbar .cb-val{min-width:52px;text-align:center;font-variant-numeric:tabular-nums;
+    white-space:nowrap;cursor:pointer;-webkit-user-select:none;user-select:none}
+  #ctrlbar .cb-val:active{opacity:.55}
+  /* center-on-me icon button, now living inside the bar (keeps its accent look;
+     inverts on press like the original box did) */
+  #loc-btn{width:32px;height:32px;padding:0;border:none;border-radius:7px;
+    background:none;color:var(--accent);cursor:pointer;flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center}
   #loc-btn:active{background:var(--accent);color:#00140a}
-  /* RANGE stepper pill — floating at the bottom-CENTRE of the visible map (the
-     open area left of the 320px panel on desktop; full width on mobile). The wrap
-     spans that area and centres the pill; pointer-events pass through the wrap so
-     only the pill itself is interactive. */
-  #range-wrap{position:absolute;z-index:16;left:calc(16px + var(--sa-l));
-    right:calc(336px + var(--sa-r));bottom:16px;display:flex;justify-content:center;
-    pointer-events:none}
-  #range-ctrl{pointer-events:auto;display:flex;align-items:center;gap:9px;
-    background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:5px 9px;font-family:var(--mono);font-size:13px;color:var(--ink);
-    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 6px 20px #0009}
-  #range-ctrl .rc-label{color:var(--ink-dim);letter-spacing:1px;font-weight:800}
-  #range-ctrl .rc-val{min-width:52px;text-align:center;font-variant-numeric:tabular-nums;
-    white-space:nowrap;cursor:pointer;font-weight:700;-webkit-user-select:none;user-select:none}
-  #range-ctrl .rc-val:active{color:var(--ok)}
-  /* the ± glyphs are DRAWN (centred bars), matching the settings-box steppers */
-  #range-ctrl .rc-btn{width:26px;height:26px;border-radius:50%;border:1px solid var(--line);
+  /* range ± — DRAWN glyphs (centred bars), accent to match the box */
+  #ctrlbar .cb-btn{width:26px;height:26px;border-radius:50%;border:1px solid var(--accent);
     background:none;cursor:pointer;padding:0;flex:0 0 auto;position:relative}
-  #range-ctrl .rc-btn::before,#range-ctrl .rc-btn.rc-plus::after{content:"";position:absolute;
-    top:50%;left:50%;transform:translate(-50%,-50%);background:var(--ink);border-radius:1px}
-  #range-ctrl .rc-btn::before{width:11px;height:2px}
-  #range-ctrl .rc-btn.rc-plus::after{width:2px;height:11px}
-  #range-ctrl .rc-btn:active{border-color:var(--ok)}
-  #range-ctrl .rc-btn:active::before,#range-ctrl .rc-btn:active::after{background:var(--ok)}
+  #ctrlbar .cb-btn::before,#ctrlbar .cb-btn.cb-plus::after{content:"";position:absolute;
+    top:50%;left:50%;transform:translate(-50%,-50%);background:var(--accent);border-radius:1px}
+  #ctrlbar .cb-btn::before{width:11px;height:2px}
+  #ctrlbar .cb-btn.cb-plus::after{width:2px;height:11px}
+  #ctrlbar .cb-btn:active{background:var(--accent)}
+  #ctrlbar .cb-btn:active::before,#ctrlbar .cb-btn:active::after{background:#00140a}
   /* data-loading ring: bottom-left of the map, fades in + spins while any feed is
      fetching (initial load, the 30s pulse, a pan refetch), fades out when idle */
   #load-ring{position:absolute;z-index:16;left:calc(16px + var(--sa-l));bottom:16px;
@@ -329,11 +324,8 @@
       box-shadow:0 -12px 40px #000a}
     .panel.open{transform:translateY(0);visibility:visible}
     /* map is full-width on mobile; keep the controls above the bottom nav */
-    #loc-btn{right:calc(14px + var(--sa-r));bottom:calc(var(--navh) + var(--sa-b) + 14px)}
+    #ctrlbar{right:calc(14px + var(--sa-r));bottom:calc(var(--navh) + var(--sa-b) + 14px)}
     #load-ring{left:calc(14px + var(--sa-l));bottom:calc(var(--navh) + var(--sa-b) + 16px)}
-    /* range pill: full map width (centred between the corner controls), above nav */
-    #range-wrap{left:calc(14px + var(--sa-l));right:calc(14px + var(--sa-r));
-      bottom:calc(var(--navh) + var(--sa-b) + 58px)}
     /* full map width, sat just above the bottom nav */
     #map-attrib{right:0;bottom:calc(var(--navh) + var(--sa-b) + 3px)}
   }
@@ -376,12 +368,17 @@
 <!-- data-loading ring: spins in the bottom-left of the map while any feed is fetching -->
 <div id="load-ring" aria-hidden="true" title="loading data…"></div>
 
-<!-- center-on-me: floating control, bottom-right of the map -->
-<button id="loc-btn" title="center map on my location" aria-label="center on my location"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 1.5v3.4M12 19.1v3.4M1.5 12h3.4M19.1 12h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
-
-<!-- RANGE stepper: floating pill at the bottom-centre of the map (max wind stays
-     in the panel settings box). Filled by flyRenderRange(). -->
-<div id="range-wrap"><div id="range-ctrl" aria-label="Range setting"></div></div>
+<!-- combined control (bottom-right): range steppers + center-on-me in one box,
+     styled like the original center-on-me button. Layout: (−) RANGE ⌖ n.n MI (+).
+     rng-val text is refreshed by flyRenderRange(); the ± and value keep the same
+     ids the delegated stepper handler drives; the ⌖ button keeps id loc-btn. -->
+<div id="ctrlbar">
+  <button type="button" class="cb-btn" id="rng-minus" aria-label="Decrease range half a mile"></button>
+  <span class="cb-label">range</span>
+  <button id="loc-btn" title="center map on my location" aria-label="center on my location"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 1.5v3.4M12 19.1v3.4M1.5 12h3.4M19.1 12h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+  <span class="cb-val" id="rng-val" role="button" tabindex="0" title="Tap to reset range">1.0 mi</span>
+  <button type="button" class="cb-btn cb-plus" id="rng-plus" aria-label="Increase range half a mile"></button>
+</div>
 
 <!-- mobile bottom navigation (data-p stays the internal panel id) -->
 <div id="mnav">
@@ -2239,9 +2236,9 @@ function flySkeletonHtml(){
   return `<div ${FLY_GRID_ATTRS}>${head}${rows}${gust}</div>`;
 }
 // The settings box — MAX WIND only — rendered into its own #fly-settings box
-// below the chart. (RANGE lives in its own floating control at the bottom-centre
-// of the map, see rangeCtrlHtml.) Independent of feed data, so it renders once at
-// boot and re-renders only when a value changes.
+// below the chart. (RANGE lives in the combined #ctrlbar control at the bottom-
+// right of the map, see flyRenderRange.) Independent of feed data, so it renders
+// once at boot and re-renders only when a value changes.
 function flySettingsHtml(){
   return `<div class="irow iset"><span class="isl">max wind</span>`
     +`<span class="id sval" id="mw-val" role="button" tabindex="0" title="Tap to reset to ${MW_DEFAULT} mph">${LIM.wind} mph</span>`
@@ -2250,16 +2247,11 @@ function flySettingsHtml(){
     +`<button type="button" class="sbtn splus" id="mw-plus" aria-label="Increase max wind 1 mph"></button></span></div>`;
 }
 function flyRenderSettings(){ const s=$('#fly-settings'); if(s) s.innerHTML=flySettingsHtml(); }
-// RANGE stepper — a floating pill at the bottom-centre of the map (so range is
-// adjusted right where its ring is drawn). Same ids as before (rng-minus/-plus/
-// -val), so the delegated stepper handler below drives it wherever it lives.
-function rangeCtrlHtml(){
-  return `<button type="button" class="rc-btn" id="rng-minus" aria-label="Decrease range half a mile"></button>`
-    +`<span class="rc-label">range</span>`
-    +`<span class="rc-val" id="rng-val" role="button" tabindex="0" title="Tap to reset to ${RNG_DEFAULT.toFixed(1)} mi">${RNG.mi.toFixed(1)} mi</span>`
-    +`<button type="button" class="rc-btn rc-plus" id="rng-plus" aria-label="Increase range half a mile"></button>`;
-}
-function flyRenderRange(){ const r=$('#range-ctrl'); if(r) r.innerHTML=rangeCtrlHtml(); }
+// RANGE lives in the combined bottom-right control (#ctrlbar: steppers + center-
+// on-me). The markup is static in the HTML; this just refreshes the value text.
+// The rng-minus/rng-plus/rng-val ids are unchanged, so the delegated stepper +
+// tap-to-reset handler below drives it as before.
+function flyRenderRange(){ const v=$('#rng-val'); if(v) v.textContent=RNG.mi.toFixed(1)+' mi'; }
 function flyRender(){
   const board=$('#fly-board'); if(!board) return;
   board.innerHTML=FLY.detail?flyBoardHtml(FLY.detail.board):flySkeletonHtml();

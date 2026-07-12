@@ -50,11 +50,11 @@ airspace query hard-throws on anything that could understate a restriction
 
 The bold altitude label marks the highest currently flyable row. **Max wind**
 (±1 mph) is set in the **settings box** below the chart; **range** (±0.5 mi,
-0.5–15) has its own stepper pill floating at the **bottom-centre of the map**,
-next to the ring it controls. Both are persisted per device. Range drives the
-FAA query radius, the traffic/radar sweep, the SITREP card radius, and the
-dashed **range ring** drawn around the crosshair. Zoom is capped so the ring
-never exceeds ⅓ of the view.
+0.5–15) has its own stepper in the floating control at the **bottom-right of the
+map** — `(−) RANGE ⌖ n.n MI (+)`, which also holds the center-on-me (⌖) button.
+Both settings are persisted per device. Range drives the FAA query radius, the
+traffic/radar sweep, the SITREP card radius, and the dashed **range ring** drawn
+around the crosshair. Zoom is capped so the ring never exceeds ⅓ of the view.
 
 ## The SITREP cards
 
