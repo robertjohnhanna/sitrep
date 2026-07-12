@@ -41,7 +41,7 @@ code in the cell where the limit bites:
 | FAA | LAANC grid ceiling caps the band; a National-Defense TFR in range grounds | FAA ArcGIS (point + range buffer) |
 | PROH / NSUF / PARK | Prohibited area, security UAS zone, or NPS land under the crosshair grounds | FAA ArcGIS · NPS |
 | PCPN | NEXRAD echo inside the range ring grounds NOW | Iowa State Mesonet mosaic (pixel-sampled) |
-| TRFC | manned aircraft under 1,000 ft AGL within the low-aircraft net (3× the ring) reds (and flashes red/white) its altitude row in NOW | ADS-B |
+| TRFC | manned aircraft within the low-aircraft net (3× the ring) caps the NOW column: the drone must stay 500 ft below it (§91.119 min altitude), so it flashes red/white at that ceiling and reds every row above | ADS-B |
 
 **Fail-safe posture:** a feed that can't be verified never silently reads
 "clear". Unknown inputs fail *open* for the grid values but amber the NOW
@@ -74,18 +74,25 @@ range ring. Cards are tiered — red hazards, amber hazards, then routine
 traffic — and distance-sorted within each tier (capped at 14, plus pinned and
 context cards):
 
-- ✈️/🚁 **LOW AIRCRAFT** — when a plane is under 1,000 ft AGL (AGL = QNH-corrected
-  altitude − ground elevation under that plane; see below) **and** inside the
-  low-aircraft warning net — **3× the range ring** (the light-grey dotted ring),
-  a wider reach than the rest of the SITREP so low manned traffic is flagged
-  early — that plane's own card transforms into the red flashing LOW AIRCRAFT
-  alert and sorts to the top; it reverts to the normal card the moment it climbs
-  out or leaves. (A breaching plane beyond the range ring but inside the grey ring
-  gets a card too; ordinary cruising traffic out there does not.) Always exactly
-  one card per plane. The same deduped collector + radius feeds the chart's TRFC
-  cells, so card, chart and map halo agree. Every plane card — civil, military,
-  emergency and low-aircraft — shows its ADS-B **ground speed** (MPH) on line 3,
-  right after the altitude.
+- ✈️/🚁 **LOW AIRCRAFT** — when a plane is under the warning altitude **and**
+  inside the low-aircraft warning net, its card transforms into the red flashing
+  LOW AIRCRAFT alert and sorts to the top; it reverts the moment it climbs out or
+  leaves. The warning altitude is the **400 ft drone ceiling + 500 ft separation
+  = 900 ft AGL** (AGL = QNH-corrected altitude − ground elevation under that
+  plane; see below): a plane below that pushes its required-clearance floor into
+  the drone band. Part 107 sets no *numeric* drone-vs-aircraft separation — the
+  rule is simply "yield the right of way" (§107.37) — so 500 ft is used as the
+  buffer, the manned minimum safe altitude over non-congested areas (§91.119(c)),
+  i.e. the closest a plane should legally get to the 400 ft band. The net itself
+  is **3× the range ring** (the light-grey dotted ring), a wider reach than the
+  rest of the SITREP so low traffic is flagged early. (A breaching plane beyond
+  the range ring but inside the grey ring gets a card too; ordinary cruising
+  traffic out there does not.) Exactly one card per plane. The same collector +
+  radius + separation feeds the chart's TRFC ceiling, so card, chart and map halo
+  agree. The chart's **TRFC** cell marks the highest usable band (plane AGL − 500,
+  clamped to the grid), flashing at that ceiling with every row above it red and
+  the rows below green. Every plane card shows its ADS-B **ground speed** (MPH) on
+  line 3, right after the altitude.
 - ⛔ **FAA NO-FLY / FAA CEILING** — surfaces the chart's own airspace gate: it
   reads the exact `aspCapFt` the flyability chart's FAA column computes (the
   FAA LAANC UASFM grid + defense TFRs swept over the range ring), so the card
@@ -215,11 +222,11 @@ parameters to the public weather APIs.
   States; aircraft, weather, and space-weather feeds are global.
 - Units are imperial (mi/ft, °F, mph). The UI is all-caps, units included — only a unit whose meaning
   depends on its case (SI symbols, a mixed-case index) would stay verbatim.
-- An aircraft that breaches the range **and** the 1,000 ft AGL warning
-  altitude flashes red/white on the map (a pulsing halo), in the SITREP
-  title, on its LOW AIRCRAFT card, and on the chart's **TRFC** cell (a TRFC
-  cell only appears while a plane breaches, so all four flash in sync).
-  Tapping the "Xs to update" badge forces an immediate refresh.
+- An aircraft that breaches the net **and** the 900 ft AGL warning altitude
+  (400 ft ceiling + 500 ft separation) flashes red/white on the map (a pulsing
+  halo), in the SITREP title, on its LOW AIRCRAFT card, and on the chart's
+  **TRFC** ceiling cell (which only appears while a plane breaches, so all four
+  flash in sync). Tapping the "Xs to update" badge forces an immediate refresh.
 - AGL is computed per plane: **QNH-corrected** barometric altitude (ADS-B
   reports pressure altitude off 29.92″; the local sea-level pressure from the
   weather feed corrects it, ~27 ft/hPa) minus the **ground elevation under that

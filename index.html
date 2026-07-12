@@ -1604,7 +1604,7 @@ function sitrepTick(){
 
   // -- LOW AIRCRAFT BREACH: a plane (civil / military / emergency) inside the
   //    WARNING net (warnKm = 3× the range ring, marked by the grey dotted ring)
-  //    AND under the WARN_AGL_FT (1,000') warning altitude. Rather
+  //    AND under the WARN_AGL_FT (400 ft ceiling + FAA_SEP_FT) warning altitude. Rather
   //    than a separate pinned card, the plane's OWN card (below) transforms into
   //    the red flashing LOW AIRCRAFT alert while it breaches, and reverts to the
   //    normal plane card when it climbs out / leaves — always exactly ONE card
@@ -1934,9 +1934,17 @@ const fmt=(n,d=0)=>(n==null||isNaN(n))?'–':Number(n).toFixed(d);
 // (Kp 5–6) is an amber CAUTION (accuracy may drop) and G3+ (Kp ≥ 7) is a red
 // GROUNDING (nav unreliable). kpCaut = caution floor, kpGnd = grounding floor.
 const SPEC={kpCaut:5,kpGnd:7,visSM:3,clrFt:500,regFt:400};
-// The traffic warning altitude [ft AGL] — ONE number shared by the SITREP's
-// LOW AIRCRAFT card and the chart's TRFC cells, so they always agree.
-const WARN_AGL_FT=1000;
+// FAA vertical separation to keep BELOW manned traffic [ft]. Part 107 sets no
+// hard numeric drone-vs-aircraft separation — §107.37 is simply "yield the right
+// of way" (see-and-avoid). 500 ft is the manned MINIMUM safe altitude over
+// non-congested areas (§91.119(c)) — the closest a plane should legally get to
+// the 400-ft drone band — so it's the natural, conservative buffer. One knob.
+const FAA_SEP_FT=500;
+// The traffic warning altitude [ft AGL] = the drone ceiling + that separation. A
+// plane below this pushes its required-clearance floor into the 0–400 ft drone
+// band, so it BOTH fires the LOW AIRCRAFT alert AND caps the chart's NOW column.
+// ONE number shared by the SITREP card and the chart, so they always agree.
+const WARN_AGL_FT=SPEC.regFt+FAA_SEP_FT;   // 400 + 500 = 900
 // LIM.wind = the aircraft's max wind [mph] — gates the surface gust and caps the
 // wind-aloft scan. Adjustable via the settings-box stepper, persisted per device.
 const MW_DEFAULT=27, MW_KEY='canifly.maxwind';
@@ -2139,24 +2147,27 @@ async function sampleRadarPrecip(lat,lon,rngMi){
   return found;
 }
 
-// ---- TRFC: the NOW-column altitude rows occupied by manned traffic — every
-// plane (civil/military/emergency) inside the LOW-AIRCRAFT warning net (the
-// shared 3× ring radius, ringViewMi) and under the warning altitude, its AGL
-// rounded to the nearest 50 ft row. Traffic just above the 400 ft band (but under
-// the warning altitude) clamps to the top row: it still denies the top of the
-// band (FAA give-way). Uses the SAME planesNear() collector + radius as the
-// SITREP's LOW AIRCRAFT card, so card and chart always agree.
-function flyTrafficRows(){
-  const c=gl.getCenter(), rows=new Set();
+// ---- TRFC: the traffic-imposed NOW-column CEILING [ft]: manned traffic requires FAA_SEP_FT
+// of vertical clearance, so a plane at AGL A pins the highest usable drone band to
+// the highest 50-ft step STRICTLY BELOW (A − FAA_SEP_FT) — the TRFC cell then
+// marks that floor (red at/above it, green below). The most restrictive plane
+// wins. Infinity = no intruding traffic; a value < 0 grounds the column. Uses the
+// SAME planesNear() collector + 3× radius as the LOW AIRCRAFT card, so they agree.
+function flyTrafficCeilFt(){
+  const c=gl.getCenter();
   const cross=groundElevFt(c.lat,c.lng);   // ft AMSL at crosshair, fallback ground
   const near=planesNear(c.lat,c.lng,ringViewMi()*MI_TO_KM);
   ensureGroundElev([[c.lat,c.lng],...near.filter(a=>a.alt<AGL_CAND_MAX_FT).map(a=>[a.pt[1],a.pt[0]])]);
+  let ceil=Infinity;
   near.forEach(a=>{
     const {agl}=planeAglFt(a,cross);   // per-plane terrain, QNH-corrected MSL
-    if(agl>=WARN_AGL_FT) return;
-    rows.add(Math.max(0,Math.min(SPEC.regFt,Math.round(agl/50)*50)));
+    if(agl>=WARN_AGL_FT) return;       // too high to intrude on the 0–400 band
+    const safeFloor=agl-FAA_SEP_FT;    // drone must stay clear of (below) this
+    // highest 50-ft band STRICTLY below the sep floor (−50 = none → grounds)
+    let top=-50; for(const ft of ALTS){ if(ft<safeFloor){ top=ft; break; } }
+    if(top<ceil) ceil=top;
   });
-  return rows;
+  return ceil;
 }
 
 // ---- state + render pipeline ----
@@ -2242,7 +2253,7 @@ function flyComputeDetail(){
     for(const r of kp.rows){ if(r.ms<=t) v=r.kp; else break; }
     return v!=null?v:kp.rows[0].kp;
   };
-  const traffic=flyTrafficRows();
+  const trafficCeil=flyTrafficCeilFt();   // NOW-only manned-traffic ceiling (Infinity = none)
   const restrict=flyRestriction();   // a hard Prohibited/security zone grounds every column
   let wxNow=null;   // NOW-column weather-gate diagnostics for the weather card
   const grid=cols.map((c,n)=>{
@@ -2266,16 +2277,23 @@ function flyComputeDetail(){
       wxNow={gust:gGust,vis:gVis,precip:gPcpn,windCeilFt,cloudCapFt,
         gustMph:c.gustKt, visSM, windPeakMph:windPeak};
     }
-    const capFt=Math.min(SPEC.regFt, cloudCapFt, windCeilFt, aspCapFt);
+    // manned traffic caps the NOW column only (it's a live snapshot, like radar)
+    const tCeil = n===0 ? trafficCeil : Infinity;
+    const capFt=Math.min(SPEC.regFt, cloudCapFt, windCeilFt, aspCapFt, tCeil);
     const grounded=globalGrounded||capFt<0;
     let maxFly=-1;
     if(!grounded) for(const ft of ALTS){ if(ft<=capFt){ maxFly=ft; break; } }
-    const capSrc=(aspCapFt<=cloudCapFt&&aspCapFt<=windCeilFt)?'FAA':(cloudCapFt<=windCeilFt?'SKY':'WIND');
+    // which cap binds → the code shown at the ceiling row. Traffic wins ties (it's
+    // the flashing safety alert), then FAA, then cloud, then wind.
+    const capSrc = tCeil<=aspCapFt&&tCeil<=cloudCapFt&&tCeil<=windCeilFt ? 'TRFC'
+             : aspCapFt<=cloudCapFt&&aspCapFt<=windCeilFt ? 'FAA'
+             : cloudCapFt<=windCeilFt ? 'SKY' : 'WIND';
     let reasonAlt=null, reason='';
     if(grounded){
       reasonAlt=0;
       reason = aspCapFt<0 ? 'FAA'
              : restrict ? restrict.code
+             : tCeil<0 ? 'TRFC'
              : gGust ? 'GUST'
              : gVis ? 'VIS'
              : gPcpn ? 'PCPN'
@@ -2288,9 +2306,8 @@ function flyComputeDetail(){
   });
   const cellState=(g,ft)=>{
     if(g.grounded) return 'bad';
-    if(g.n===0&&traffic.has(ft)) return 'bad';   // manned traffic at this altitude NOW
     const kt=g.prof(ft); if(kt==null) return '';
-    if(ft>g.capFt||atLim(kt)) return 'bad';
+    if(ft>g.capFt||atLim(kt)) return 'bad';   // above any cap (incl. the traffic ceiling) → red
     return 'good';
   };
   const nowMaxFly=grid.length?grid[0].maxFly:-1;
@@ -2307,15 +2324,15 @@ function flyComputeDetail(){
   const topFt=ALTS[0];
   const altRows=ALTS.map(ft=>{
     const cells=grid.map(g=>{
-      if(g.reasonAlt===ft) return {v:g.reason, st:cellState(g,ft), rsn:true};   // the column's own code wins its cell
-      if(g.n===0&&traffic.has(ft)) return {v:'TRFC', st:'bad', rsn:true, flash:true};  // low traffic reds AND flashes its altitude, NOW column
+      // the column's own cap code wins its cell; the TRFC ceiling flashes red/white
+      // (matching the LOW AIRCRAFT alert), every other cap code is static.
+      if(g.reasonAlt===ft) return {v:g.reason, st:cellState(g,ft), rsn:true, flash:g.reason==='TRFC'};
       return {v:one(g.prof(ft)), st:cellState(g,ft)};
     });
-    // hi = the bold "highest you can fly right now" label — suppressed when manned
-    // traffic occupies that exact row (a red TRFC cell can't also be the ceiling)
+    // hi = the bold "highest you can fly right now" label (the top green row)
     return {a:ft===0?'sfc':comma(ft), u:ft===topFt?'ft':'',
       st:cells.length&&cells[0].st==='bad'?'bad':'',
-      hi:nowMaxFly>=0&&ft===nowMaxFly&&!traffic.has(ft), cells};
+      hi:nowMaxFly>=0&&ft===nowMaxFly, cells};
   });
   const gustCells=grid.map((g,i)=>({v:one(g.gustKt), st:atLim(g.gustKt)?'bad':'',
     u:i===grid.length-1?'mph':''}));
