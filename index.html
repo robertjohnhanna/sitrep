@@ -215,6 +215,10 @@
     border-radius:50%;opacity:0;transition:opacity .3s;pointer-events:none;
     filter:drop-shadow(0 0 3px #000)}
   #load-ring.on{opacity:.9;animation:sp .8s linear infinite}
+  /* the same spinner, inline just after the SITREP title (shares updateLoadRing) */
+  #sit-load{flex:0 0 auto;width:13px;height:13px;border:2px solid #2a3a4d;
+    border-top-color:var(--accent);border-radius:50%;opacity:0;transition:opacity .3s}
+  #sit-load.on{opacity:.9;animation:sp .8s linear infinite}
   #sit-body{display:flex;flex-direction:column;align-content:start;
     overflow-y:auto;padding:4px 0;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0}
   /* every SITREP row is a uniform 3-line block: icon · three text lines (or a
@@ -307,6 +311,7 @@
 <div id="sitrep" class="panel">
   <div id="sit-head">
     <span class="title" id="sit-title">◈ SITREP</span>
+    <span id="sit-load" aria-hidden="true" title="loading data…"></span>
     <span id="refresh-badge" title="time to next data refresh"><b id="refresh-count">30</b>s to update</span>
   </div>
   <!-- canifly drone-preflight chart — the flyability grid, driven by the
@@ -2087,12 +2092,13 @@ function flyOnMove(){
   flyRefresh();
 }
 
-// Data-loading ring (bottom-left of the map): on while ANY map layer or the
-// canifly chart is mid-fetch — the initial load, the 30s pulse, a pan refetch.
+// Data-loading spinner — on while ANY map layer, the canifly chart or the weather
+// pull is mid-fetch (initial load, the 30s pulse, a pan refetch). Drives both the
+// bottom-left map ring and the inline spinner after the SITREP title.
 function updateLoadRing(){
-  const r=$('#load-ring'); if(!r) return;
-  const busy = flyBusy || LAYERS.some(cfg=>{ const st=LAYER_STATE[cfg.id]; return st&&st.loading; });
-  r.classList.toggle('on',busy);
+  const busy = flyBusy || wxBusy || LAYERS.some(cfg=>{ const st=LAYER_STATE[cfg.id]; return st&&st.loading; });
+  const r=$('#load-ring'); if(r) r.classList.toggle('on',busy);
+  const s=$('#sit-load');  if(s) s.classList.toggle('on',busy);
 }
 
 /* =====================================================================
