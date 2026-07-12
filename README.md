@@ -210,9 +210,13 @@ through to the same layout as a tablet or desktop.
 
 On load: instant IP fix (ipwho.is), refined by browser GPS if you allow the
 prompt (denial is silently tolerated), then one clean camera move framing 3×
-the range ring. The ⌖ button recentres on you. Position is resolved
-client-side and never leaves the browser except as anonymous lat/lon query
-parameters to the public weather APIs.
+the range ring. A continuous geolocation **watch** keeps the green **you-are-here
+dot live** as you move. The ⌖ button **cycles**: first tap **centers** on you
+(keeps your zoom), second tap **locks + follows** — the map tracks your live
+position and the icon becomes a 🔒 padlock — and a third tap **unlocks** (icon
+back to the crosshair); the chain then repeats. Position is resolved client-side
+and never leaves the browser except as anonymous lat/lon query parameters to the
+public weather APIs.
 
 ## Design notes & honest caveats
 

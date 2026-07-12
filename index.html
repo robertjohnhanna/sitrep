@@ -1330,30 +1330,46 @@ async function locate(){
         {place:j.city,region:j.region,rc:j.region_code,cc:j.country_code,
          tz:(j.timezone&&j.timezone.id)||''});
   }catch(e){ console.warn('[ip-locate]',e.message); }
-  if(navigator.geolocation){
-    try{
-      navigator.geolocation.getCurrentPosition(
-        pos=>setUserFix(pos.coords.latitude,pos.coords.longitude,'gps',null),
-        ()=>{},{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
-    }catch(e){}
-  }
+  startGeoWatch();
 }
-// "center on me": recenter the map on the fix at the CURRENT zoom — it just pans
-// there, it does not change the zoom level. If no fix yet, kick off IP + GPS
-// location and prompt for precise GPS.
+// LIVE DOT — one continuous geolocation watch keeps USER (and the green map dot)
+// tracking the real position; watchPosition's first callback is the initial GPS
+// fix, so it replaces the old one-shot getCurrentPosition. Started once; ignored
+// on repeat calls or when geolocation is unavailable/denied.
+let geoWatchId=null;
+function startGeoWatch(){
+  if(geoWatchId!=null||!navigator.geolocation) return;
+  try{
+    geoWatchId=navigator.geolocation.watchPosition(
+      pos=>setUserFix(pos.coords.latitude,pos.coords.longitude,'gps',null),
+      ()=>{},{enableHighAccuracy:true,timeout:10000,maximumAge:5000});
+  }catch(e){}
+}
+// The ⌖ / lock icons. The location icon = the framed crosshair; the lock icon =
+// a padlock (shown while FOLLOW-locked). Both use currentColor (white, inverting
+// on press), so they inherit the button styling.
+const LOC_SVG='<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 1.5v3.4M12 19.1v3.4M1.5 12h3.4M19.1 12h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+const LOCK_SVG='<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7.5 10.5V7.5a4.5 4.5 0 0 1 9 0v3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><rect x="4.7" y="10.2" width="14.6" height="10.4" rx="2.3" fill="currentColor"/></svg>';
+function setLocIcon(locked){
+  const b=$('#loc-btn'); if(!b) return;
+  b.innerHTML=locked?LOCK_SVG:LOC_SVG;
+  b.title=locked?'following your location — tap to unlock':'center map on my location';
+  b.setAttribute('aria-label',locked?'unlock location follow':'center on my location');
+}
+// The ⌖ button cycles: CENTER (pan to me, keep zoom) → LOCK (map follows the live
+// fix; icon → padlock) → UNLOCK (stop following; icon → crosshair) → repeat. When
+// there's no fix yet, the first tap just kicks off location.
+// locMode: 0 idle · 1 centered · 2 locked (following).
+let locMode=0;
 function centerOnMe(){
-  if(USER.lat!=null){
-    cancelCenterZoom();
-    gl.easeTo({center:[USER.lon,USER.lat],duration:800});   // recenter only, keep the zoom
-    // refine the fix in the background (locate() already does this on first fix,
-    // so only the has-fix branch asks — never two concurrent GPS requests)
-    if(navigator.geolocation) try{ navigator.geolocation.getCurrentPosition(
-      p=>setUserFix(p.coords.latitude,p.coords.longitude,'gps',null),()=>{},
-      {enableHighAccuracy:true,timeout:10000}); }catch(e){}
-  } else {
-    toast('LOCATING…');
-    locate();
+  if(USER.lat==null){ toast('LOCATING…'); locate(); return; }
+  if(locMode===2){                 // LOCKED → unlock (leave the map where it is)
+    locMode=0; setLocIcon(false); return;
   }
+  cancelCenterZoom();
+  gl.easeTo({center:[USER.lon,USER.lat],duration:locMode?400:800});   // snap to me, keep zoom
+  if(locMode===0){ locMode=1; }    // idle → centered
+  else { locMode=2; setLocIcon(true); }   // centered → lock + follow
 }
 $('#loc-btn').addEventListener('click',centerOnMe);
 
@@ -1401,6 +1417,11 @@ function setUserFix(lat,lon,src,meta){
   if(first){
     // first fix: one clean animation to the 3×-range-ring view
     flyToRadiusMi(lat,lon,ringViewMi());
+  } else if(locMode===2){
+    // FOLLOW-LOCKED: keep the crosshair glued to the live position at the current
+    // zoom (so the whole SITREP/chart tracks where you actually are).
+    cancelCenterZoom();
+    gl.easeTo({center:[lon,lat],duration:500});
   } else if(src==='gps'&&pLat!=null&&havKm(pLat,pLon,lat,lon)>8){
     // GPS refined the IP guess by a lot (>8 km): re-frame at the precise spot.
     // Re-framing (not easeTo) so the final ZOOM is always the right one — easeTo
