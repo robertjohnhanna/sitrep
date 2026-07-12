@@ -396,7 +396,9 @@ const ADSB_HOSTS=['https://api.airplanes.live/v2','https://opendata.adsb.fi/api/
 async function adsb(path){
   let err;
   for(const h of ADSB_HOSTS){
-    try{ return await getJSON(h+path,{timeout:12000}); }catch(e){ err=e; }
+    // 9s per host (was 12): a normal /point response is a second or two, so a longer
+    // wait just means a stuck mirror hangs the whole load — fall back to the next sooner.
+    try{ return await getJSON(h+path,{timeout:9000}); }catch(e){ err=e; }
   }
   throw err||new Error('all ADS-B hosts unreachable');
 }
@@ -940,8 +942,10 @@ defLayer({
    4. LAYER RUNTIME — sources, styles, refresh loop
    ===================================================================== */
 const LAYER_STATE={};
-// icons grow with zoom so they read clearly world-wide and up close
-const iconSize=base=>['interpolate',['linear'],['zoom'],2,base*1.4,6,base*2.2,11,base*3.2];
+// icons grow with zoom so they read clearly world-wide and up close (kept ~40%
+// smaller than before so a plane doesn't blanket a mile at the load zoom, while the
+// detailed shape is still distinguishable and the zoom-scaling curve is preserved)
+const iconSize=base=>['interpolate',['linear'],['zoom'],2,base*0.85,6,base*1.3,11,base*1.9];
 // The SITREP re-reads layer data as part of every refresh — debounced so a
 // burst of near-simultaneous layer updates recomputes it once, not N times.
 let sitrepRefreshT=null;
@@ -1864,10 +1868,13 @@ function sitrepTick(){
     if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
     t.classList.toggle('acflash',acFlash);   // breaching aircraft → flash red/white
   });
-  // the map range ring tracks the SITREP title severity: green clear / amber
-  // reduced-or-unverified / red grounded (same 0·1·2 the title colour uses).
+  // BOTH map rings track the SITREP title severity: green clear / amber reduced-or-
+  // unverified / red grounded (same 0·1·2 the title colour uses). The inner range ring
+  // and the outer grey traffic ring share the verdict colour; they stay distinguishable
+  // by dash pattern (inner dashed, outer dotted).
   const sevCol=SEV_COL[titleSev]||SEV_COL[0];
   if(gl.getLayer('ly-ring')) gl.setPaintProperty('ly-ring','line-color',sevCol);
+  if(gl.getLayer('ly-warnring')) gl.setPaintProperty('ly-warnring','line-color',sevCol);
   // The red flashing LOW AIRCRAFT breach is the most immediate, out-of-nowhere threat
   // (a manned aircraft low and in range), so it jumps to the very TOP of the pile —
   // above even the pinned FAA / space-weather / data cards. cd[7] (the flash flag) is
@@ -2684,7 +2691,7 @@ gl.on('load',()=>{
   gl.addSource('src-warnring',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   gl.addLayer({id:'ly-warnring',type:'line',source:'src-warnring',
     layout:{'line-cap':'round'},
-    paint:{'line-color':'#aab4bf','line-width':1.4,'line-opacity':0.5,'line-dasharray':[0,2.6]}});
+    paint:{'line-color':SEV_COL[0],'line-width':1.4,'line-opacity':0.55,'line-dasharray':[0,2.6]}});
   // range ring — a dashed accent circle tracking the crosshair at RNG.mi, added
   // last so it sits on top of the map layers (under the HTML crosshair overlay)
   gl.addSource('src-ring',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
@@ -2692,12 +2699,16 @@ gl.on('load',()=>{
     paint:{'line-color':SEV_COL[0],'line-width':1.5,'line-opacity':0.72,'line-dasharray':[2,2]}});
   updateRing();
   enforceRingZoom();   // establish the initial ring-≤-1/3 max-zoom cap
-  // Pull every DYNAMIC layer once on load (SPC feeds the SITREP outlook card
-  // only). STATIC layers (airspace/NPS) are a regional cache — don't pull them
-  // around the pre-fix default centre; the first location fix's moveend loads
-  // the region around YOU (with a fallback below if no fix ever lands).
-  LAYERS.forEach(cfg=>{ LAYER_STATE[cfg.id].started=true; if(!cfg.static) runLayer(cfg); });
-  setTimeout(ensureStaticRegion,3500);   // fallback: load the region even if location never resolves
+  // Pull DYNAMIC, NON-VIEWPORT layers once on load (mil/sos are small global queries;
+  // SPC feeds the SITREP outlook card). We SKIP the pre-fix default centre for:
+  //  • STATIC layers (airspace/NPS) — a regional cache, and
+  //  • the heavy VIEWPORT aircraft feed — a 250 nm query over the US interior before we
+  //    know where you are is pure waste (thousands of planes, the slowest pull) and gets
+  //    thrown away the moment the fix lands.
+  // The first location fix's moveend loads BOTH around YOU (fallback below if none lands).
+  LAYERS.forEach(cfg=>{ LAYER_STATE[cfg.id].started=true; if(!cfg.static && !cfg.viewport) runLayer(cfg); });
+  setTimeout(()=>{ ensureStaticRegion();   // fallback: load region + aircraft even if location never resolves
+    if(USER.lat==null) LAYERS.forEach(cfg=>{ if(cfg.viewport) runLayer(cfg); }); },3500);
   refreshBase=Date.now(); setInterval(refreshTick,1000); refreshTick(); // refresh pulse + clock
   updateLoadRing(); setInterval(updateLoadRing,200);   // bottom-left data-loading ring
   loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare (SITREP card)

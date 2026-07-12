@@ -60,12 +60,15 @@ limit is hardcoded to **27 mph**:
 
 - **RED · 1 mi** — the dashed **range ring** drawn around the crosshair. It's the
   FAA query radius, the radar-echo sweep, the SITREP card radius, and the *red
-  flashing* low-aircraft alert zone. The ring is tinted to the current verdict —
-  green clear, amber reduced/unverified, red grounded — so the one-glance colour
-  reaches the map even when the panel is off-screen.
-- **GREY · 5 mi** — the **light-grey dotted ring**: the traffic net. Every plane
-  inside it is tracked, and a *low* one out here raises an **amber** low-aircraft
-  heads-up (see LOW AIRCRAFT below).
+  flashing* low-aircraft alert zone.
+- **GREY · 5 mi** — the **dotted traffic ring**. Every plane inside it is tracked,
+  and a *low* one out here raises an **amber** low-aircraft heads-up (see LOW
+  AIRCRAFT below).
+
+**Both rings are tinted to the current verdict** — green clear, amber
+reduced/unverified, red grounded — so the one-glance colour reaches the map even
+when the panel is off-screen; they stay distinguishable by dash (inner dashed,
+outer dotted).
 - **VIEW · 10 mi** (2× grey) — the framing radius the map opens to on a location
   fix and resets to on the ⌖ button, and the **tightest allowed zoom**: the view
   never shows less than a 10-mile radius. Pan north and the camera eases back out
@@ -193,7 +196,7 @@ gate input.
 
 | Layer | Source | Refresh |
 |---|---|---|
-| Aircraft (250 nm around centre, civil) | airplanes.live → adsb.fi fallback | on move · 15 s |
+| Aircraft (250 nm around centre, civil) — loads around YOU (the heavy query skips the pre-fix default centre, so the first pull isn't a wasted sweep of the US interior) | airplanes.live → adsb.fi fallback | on move · 15 s |
 | Military aircraft (worldwide) | ADS-B `/mil` | 15 s |
 | Emergency squawks (worldwide) | ADS-B `/squawk` | 15 s |
 | NWS warning polygons (US) — red outline for Extreme/Severe, amber otherwise | api.weather.gov | 15 s |
