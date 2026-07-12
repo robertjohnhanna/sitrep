@@ -994,8 +994,15 @@ function scheduleSitrep(){ clearTimeout(sitrepRefreshT); sitrepRefreshT=setTimeo
 // A FAILED lookup is NEVER cached — a poisoned 0 would silently disable the AGL
 // correction (and the low-traffic warnings) in high terrain for the session; it
 // just backs off briefly and retries on a later tick.
-const _elevCache={}; let _elevBusy=false, _elevFailAt=0;
+const _elevCache={}; let _elevBusy=false, _elevFailAt=0, _elevAt=0;
 const ELEV_RETRY_MS=15000;
+// Hard COOLDOWN between elevation fetches. Without it the finally's scheduleSitrep
+// re-ticks → re-calls ensureGroundElev, and any cell that never caches (a plane
+// over water/off-grid returns a non-finite elevation, which we correctly refuse
+// to cache) stays in `need` forever → a tight fetch loop that hammers Open-Meteo
+// and rate-limits the chart's OWN weather pull (same host) into failing. The
+// cooldown caps this to ~one batch per interval no matter what.
+const ELEV_COOLDOWN_MS=20000;
 const elevKey=(la,lo)=>la.toFixed(2)+','+lo.toFixed(2);
 function groundElevFt(la,lo){
   const v=_elevCache[elevKey(la,lo)];
@@ -1005,14 +1012,14 @@ function groundElevFt(la,lo){
 // batched request. Deduped by cell and capped so the URL stays sane. Re-runs the
 // SITREP + chart when it lands so AGL fills in on the next tick.
 function ensureGroundElev(pts){
-  if(_elevBusy || Date.now()-_elevFailAt<=ELEV_RETRY_MS) return;
+  if(_elevBusy || Date.now()-_elevFailAt<=ELEV_RETRY_MS || Date.now()-_elevAt<ELEV_COOLDOWN_MS) return;
   const need=[], seen=new Set();
   for(const p of pts){ if(!p||!isFinite(p[0])||!isFinite(p[1])) continue;
     const k=elevKey(p[0],p[1]); if((k in _elevCache)||seen.has(k)) continue;
     seen.add(k); need.push([p[0],p[1],k]); }
   if(!need.length) return;
   const batch=need.slice(0,90);
-  _elevBusy=true;
+  _elevBusy=true; _elevAt=Date.now();
   const lats=batch.map(n=>n[0].toFixed(4)).join(',');
   const lons=batch.map(n=>n[1].toFixed(4)).join(',');
   getJSON(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`,{timeout:9000})
@@ -1326,17 +1333,28 @@ async function loadWeather(force){
   }catch(e){ /* keep the last-good WX */ }
   finally{ wxBusy=false; scheduleSitrep(); }
 }
-// The weather SITREP card [cls, icon, l1, l2, l3, action, hazard]. Neutral,
-// non-clickable, always present (a placeholder until the first fetch lands).
-function wxCard(){
+// The weather SITREP card [cls, icon, l1, l2, l3, action, hazard]. Always present.
+// It ALSO carries the weather-feed health (so there's no separate DATA "weather"
+// card for the same object): wxState 'down' = the chart's weather never loaded
+// (red, chart can't compute — this is what surfaces a total-outage hang), 'stale'
+// = the feed is failing but last-good conditions still show (amber), 'ok' =
+// healthy. 'down'/'stale' are tappable to force a refresh.
+function wxCard(wxState){
   const rnd=n=>n==null?null:Math.round(n);
-  if(!WX) return ['','🌡️','WEATHER','ACQUIRING FORECAST…','','',false];
+  const retry='data-act="refresh"';
+  if(wxState==='down') return ['danger','🌡️','WEATHER UNAVAILABLE','feed down · chart can\'t compute',
+    'tap to retry',retry,true];
+  if(!WX) return wxState==='stale'   // no conditions loaded yet
+    ? ['alert','🌡️','WEATHER','feed unreachable','tap to retry',retry,true]
+    : ['','🌡️','WEATHER','ACQUIRING FORECAST…','','',false];
   const [emoji,desc]=WMO[WX.code]||['🌡️','—'];
   const t=rnd(WX.tempF), f=rnd(WX.feelsF), w=rnd(WX.windMph), hi=rnd(WX.hiF), lo=rnd(WX.loF);
   const l1=(t!=null?t+'°':'—')+' · '+desc.toUpperCase();
   const wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
   const l2='WIND '+wd+(w!=null?w+U(' mph'):'—')+(f!=null?' · FEELS '+f+'°':'');
   const l3=(hi!=null?'HIGH '+hi+'°':'')+(hi!=null&&lo!=null?' · ':'')+(lo!=null?'LOW '+lo+'°':'');
+  // feed failing but we still have last-good conditions → amber "stale, tap"
+  if(wxState==='stale') return ['alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE — TAP',retry,true];
   return ['',emoji,l1,l2,l3,'',false];
 }
 /* =====================================================================
@@ -1677,19 +1695,20 @@ function sitrepTick(){
   // -- DATA HEALTH (pinned): the flyability gates fail OPEN — an unverifiable feed
   //    keeps its last-good value and only ambers the NOW header quietly. This card
   //    surfaces that explicitly (and touch-accessibly, unlike the hover tooltip)
-  //    once a feed has been stale past the grace window: AMBER while the chart
-  //    still renders from last-good data, RED when there's no NOW verdict at all
-  //    (weather never loaded → flying blind; this is what reddens the title in a
-  //    total outage the chart alone can't express). Tap to force a refresh;
-  //    clears the moment every feed is fresh. --
-  const dataBad=flyUnknownStable();
+  //    once a feed has been stale past the grace window. WEATHER is excluded here
+  //    — its health rides the always-present WX card below (no duplicate card for
+  //    the same feed) — so this covers FAA airspace / Kp / radar only. Amber; tap
+  //    to force a refresh; clears the moment every feed is fresh. --
+  const unstable=flyUnknownStable();
+  const wxStale=unstable.includes('weather');
+  const dataBad=unstable.filter(x=>x!=='weather');
   if(dataBad.length){
-    const listTxt=cut(dataBad.join(' · '),30);
-    if(!FLY.data) cards.push(['danger','📡','DATA UNAVAILABLE',listTxt||'no flight data',
-      'tap to retry','data-act="refresh"',true]);
-    else cards.push(['alert','📡','DATA UNVERIFIED',listTxt,
+    cards.push(['alert','📡','DATA UNVERIFIED',cut(dataBad.join(' · '),30),
       'tap to retry','data-act="refresh"',true]);
   }
+  // weather-feed health for the WX card: down = never loaded (red, chart blind),
+  // stale = failing but last-good conditions still show (amber)
+  const wxState=wxStale?(FLY.data?'stale':'down'):'ok';
 
   // -- GENERAL context cards (area-wide, not a single map point). Collected here
   //    but appended at the BOTTOM of the pile (after the distance-sorted items) —
@@ -1790,7 +1809,7 @@ function sitrepTick(){
       llBtn(flyPt[0],flyPt[1]), hazardOv!=null?hazardOv:cfg.hazard, flash?true:undefined, col]);
   });
   general.forEach(c=>cards.push(c));   // area-wide context cards sink to the bottom
-  cards.push(wxCard());                // weather forecast — always the bottom card
+  cards.push(wxCard(wxState));         // weather forecast + feed health — always the bottom card
 
   // title severity: 0 none · 1 alert (amber) · 2 warn (red). Driven by the
   // flyability NOW column FIRST — any grounding value/condition reds it, any

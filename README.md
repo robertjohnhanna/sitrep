@@ -88,12 +88,16 @@ context cards):
   **finalized observed** value for NOW (the in-progress estimate is preliminary
   and jumpy), forecasts for the +1/+2/+3h columns — so card and chart agree.
 - 📡 **DATA** — the flyability gates fail *open*, so an unverifiable feed keeps
-  its last-good value and only ambers the NOW header quietly. If a feed stays
-  stale past a ~35 s grace window (a self-healing blip won't pop it), this card
-  names the stale feeds: **amber** while the chart still renders from last-good
-  data, **red** ("data unavailable") when there's no NOW verdict at all — the
-  case that also reddens the title. Tap it to force a refresh; it clears the
-  moment every feed is fresh.
+  its last-good value and only ambers the NOW header quietly. If **FAA airspace,
+  Kp, or radar** stays stale past a ~35 s grace window (a self-healing blip won't
+  pop it), this amber card names them. Tap to force a refresh; it clears the
+  moment every feed is fresh. (Weather health rides the WX card instead — see
+  below — so there's never a duplicate card for the same feed.)
+- The 🌡️ **WEATHER** card doubles as the weather-feed health indicator: it turns
+  **amber** ("stale — tap") when the feed is failing but last-good conditions
+  still show, and **red** ("weather unavailable") when the feed never loaded and
+  the chart can't compute — the red case reddens the title so a total weather
+  outage can't hide behind a green skeleton.
 - 🚨 emergency squawks (7700/7600/7500) · ⚠️ NWS **warnings** (not watches) ·
   ⛔/⚠️ FAA restrictions (defense, prohibited, security, MOA, stadium…) ·
   🏞️ NPS land · 🗼 controlled airspace (Class B/C/D/E) · ✈️ / 🪖 civil and
