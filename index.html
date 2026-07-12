@@ -1012,6 +1012,7 @@ function refreshDueLayers(){
   // 30s cycle; Kp throttles itself to the 180s space-weather cadence and the FAA
   // airspace to its location/range-keyed cache — all inside flyRefresh().
   flyRefresh();
+  loadWeather();   // SITREP weather card (self-throttled to ~5 min / >2 km moves)
 }
 // data-refresh countdown ("Xs to update") in the SITREP header
 function refreshTick(){
@@ -1159,6 +1160,50 @@ async function loadXray(){
     XRAY=(f&&(f.current_class||f.max_class))||null;
   }catch(e){ XRAY=null; }
   scheduleSitrep();
+}
+// ---- WEATHER FORECAST (Open-Meteo, keyless CORS-*) — the always-present bottom
+//      SITREP card, so the panel is never empty. Fetched for the crosshair,
+//      refreshed when it moves >2 km or the reading ages past ~5 min. WMO weather
+//      codes map to an emoji + a plain-english condition. ----
+let WX=null, wxLat=null, wxLon=null, wxAt=0, wxBusy=false;
+const WMO={0:['☀','clear'],1:['🌤','mostly clear'],2:['⛅','partly cloudy'],3:['☁','overcast'],
+  45:['🌫','fog'],48:['🌫','icy fog'],
+  51:['🌦','light drizzle'],53:['🌦','drizzle'],55:['🌧','heavy drizzle'],56:['🌧','freezing drizzle'],57:['🌧','freezing drizzle'],
+  61:['🌧','light rain'],63:['🌧','rain'],65:['🌧','heavy rain'],66:['🌧','freezing rain'],67:['🌧','freezing rain'],
+  71:['🌨','light snow'],73:['🌨','snow'],75:['🌨','heavy snow'],77:['🌨','snow grains'],
+  80:['🌦','light showers'],81:['🌧','showers'],82:['⛈','heavy showers'],85:['🌨','snow showers'],86:['🌨','snow showers'],
+  95:['⛈','thunderstorm'],96:['⛈','storm, hail'],99:['⛈','storm, hail']};
+async function loadWeather(force){
+  if(wxBusy) return;
+  const c=gl.getCenter();
+  if(!force && WX && wxLat!=null && havKm(wxLat,wxLon,c.lat,c.lng)<2 && Date.now()-wxAt<300000) return;
+  wxBusy=true;
+  try{
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat.toFixed(3)}&longitude=${c.lng.toFixed(3)}`
+      +`&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m`
+      +`&daily=temperature_2m_max,temperature_2m_min`
+      +`&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1`;
+    const d=await getJSON(u,{timeout:12000});
+    const cur=d.current||{}, day=d.daily||{};
+    WX={tempF:cur.temperature_2m, feelsF:cur.apparent_temperature, code:cur.weather_code,
+        windMph:cur.wind_speed_10m, windDir:cur.wind_direction_10m,
+        hiF:(day.temperature_2m_max||[])[0], loF:(day.temperature_2m_min||[])[0]};
+    wxLat=c.lat; wxLon=c.lng; wxAt=Date.now();
+  }catch(e){ /* keep the last-good WX */ }
+  finally{ wxBusy=false; scheduleSitrep(); }
+}
+// The weather SITREP card [cls, icon, l1, l2, l3, action, hazard]. Neutral,
+// non-clickable, always present (a placeholder until the first fetch lands).
+function wxCard(){
+  const rnd=n=>n==null?null:Math.round(n);
+  if(!WX) return ['','🌡️','WEATHER','ACQUIRING FORECAST…','','',false];
+  const [emoji,desc]=WMO[WX.code]||['🌡️','—'];
+  const t=rnd(WX.tempF), f=rnd(WX.feelsF), w=rnd(WX.windMph), hi=rnd(WX.hiF), lo=rnd(WX.loF);
+  const l1=(t!=null?t+'°':'—')+' · '+desc.toUpperCase();
+  const wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
+  const l2='WIND '+wd+(w!=null?w+U(' mph'):'—')+(f!=null?' · FEELS '+f+'°':'');
+  const l3=(hi!=null?'HIGH '+hi+'°':'')+(hi!=null&&lo!=null?' · ':'')+(lo!=null?'LOW '+lo+'°':'');
+  return ['',emoji,l1,l2,l3,'',false];
 }
 /* =====================================================================
    6b. LOCATION + SITREP — the "at a glance" intelligence layer
@@ -1470,6 +1515,7 @@ async function sitrepTick(){
       llBtn(pt[0],pt[1]), cfg.hazard]);
   });
   general.forEach(c=>cards.push(c));   // area-wide context cards sink to the bottom
+  cards.push(wxCard());                // weather forecast — always the bottom card
 
   // title severity from HAZARD cards only: 0 none · 1 alert (amber) · 2 warn (red)
   let titleSev=0;
@@ -1479,8 +1525,8 @@ async function sitrepTick(){
   if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
   cards.forEach(cd=>row(cd[0],cd[1],cd[2],cd[3],cd[4],cd[5]));
 
-  $('#sit-body').innerHTML=rows.length?rows.join(''):
-    '<div class="sit-empty">NO SIGNALS IN RANGE — WIDEN THE RANGE OR MOVE THE CROSSHAIR</div>';
+  // the weather card is always appended, so there's always at least one row
+  $('#sit-body').innerHTML=rows.join('');
 }
 
 // action handler for a clicked SITREP card: fly to a point, or open a source page
@@ -2033,6 +2079,7 @@ async function flyRefresh(){
 // changes reuse the data in place). The threshold matches the airspace cache
 // tolerance, so any pan big enough to matter legally also refreshes the chart.
 function flyOnMove(){
+  loadWeather();   // refresh the weather card for the new crosshair (self-throttled)
   if(FLY.data&&havKm(FLY.data.lat,FLY.data.lon,gl.getCenter().lat,gl.getCenter().lng)<ASP_TOL_KM) return;
   flyRefresh();
 }
@@ -2098,6 +2145,7 @@ gl.on('load',()=>{
   updateLoadRing(); setInterval(updateLoadRing,200);   // bottom-left data-loading ring
   loadKp();   setInterval(loadKp,180000);   // space weather: planetary Kp (SITREP card)
   loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare (SITREP card)
+  loadWeather(true);   // weather forecast: the always-present bottom SITREP card
   setMapPadding();
   flyRenderSettings(); flyRender(); flyRefresh();   // settings box + skeleton now, first data pull immediately
   locate();
