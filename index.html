@@ -1412,14 +1412,16 @@ const CATS=[
      MOA:'MILITARY OPS AREA',W:'WARNING AREA',A:'ALERT AREA',D:'DANGER AREA',STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
    detail:f=>f.properties.sev==='hard'?'drones prohibited':f.properties.cls==='STDM'?'during events':'verify NOTAMs'},
-  // Controlled airspace (Class B/C/D + surface E) in range — an informational
-  // card: drones need LAANC / ATC authorization here, but it isn't a no-fly, so
-  // it's neutral (no colour, doesn't drive the title severity). Deduped below so
-  // Class B's many same-name shelves collapse to one card.
-  {src:'airspace', hazard:false, filter:f=>f.properties.sev==='ctrl', icon:'🗼', cls:()=>'',
+  // Controlled airspace (Class B/C/D + surface E) in range — an authorization
+  // card: drones need LAANC / ATC authorization here. Neutral by default (the
+  // class alone isn't a no-fly), but when you're OVERHEAD it (crosshair inside),
+  // the card escalates to match the chart's LAANC ceiling: red if that airspace
+  // grounds you (0 ft ceiling), amber if it caps you below 400 — see the ctrl
+  // override in sitrepTick. Deduped below so Class B's shelves collapse to one.
+  {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl', icon:'🗼', cls:()=>'',
    head:f=>({B:'CLASS B AIRSPACE',C:'CLASS C AIRSPACE',D:'CLASS D AIRSPACE',E:'CLASS E AIRSPACE'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
-   detail:()=>'authorization required'},
+   detail:()=>'authorization'},
   // National Park Service lands — a drone no-fly (can't launch / land / operate).
   {src:'nps', hazard:true, icon:'🏞️', cls:()=>'danger',
    head:f=>cut(f.properties.name||'NPS LAND',20),
@@ -1546,16 +1548,30 @@ function sitrepTick(){
   //    AIRCRAFT card, i.e. at warning distance/altitude). Tiers: red hazards,
   //    amber hazards, everything else — distance sorts WITHIN each tier.
   //    Capped so a busy area can't flood it. --
+  // The LAANC ceiling the chart computed for the crosshair — lets a controlled-
+  // airspace card you're OVERHEAD escalate to match it (grounded → red, capped →
+  // amber). -1 = no-fly, <400 = capped, 400 = no limit; null when unknown.
+  const aspCap=(FLY.detail&&!FLY.detail.aspUnknown)?FLY.detail.aspCapFt:null;
   const items=[];
   CATS.forEach(cfg=>catItems(cfg,lat,lon,rangeKm).forEach(f=>{
     const g=f.geometry; if(!g) return;
-    const cls=cfg.cls?cfg.cls(f):'';
-    const tier=cfg.hazard?(cls==='danger'?0:1):2;
     // pt = where tapping the card flies to; km = distance for sorting/label.
     // For a polygon this is the CLOSEST EDGE point to the crosshair — so an
     // airspace card takes you to the nearest edge near you, even when you're
     // standing inside it (inside still sorts to the top / reads "overhead").
     const inside=g.type!=='Point'&&pointInFeature(f,lon,lat);
+    let cls=cfg.cls?cfg.cls(f):'', det=null;
+    // OVERHEAD controlled airspace: colour + label it by the real LAANC ceiling.
+    if(cfg.ctrl&&inside&&aspCap!=null){
+      // line 3 already reads "overhead · …", so det is just the consequence
+      if(aspCap<0){ cls='danger'; det='no-fly'; }
+      else if(aspCap<SPEC.regFt){ cls='alert'; det='ceiling '+aspCap+U(' ft'); }
+    }
+    // colour drives tier so a red "no-fly overhead" sorts up with the hazards;
+    // everything else keeps its original hazard/neutral tier.
+    const tier=(cfg.ctrl&&(cls==='danger'||cls==='alert'))
+      ? (cls==='danger'?0:1)
+      : (cfg.hazard?(cls==='danger'?0:1):2);
     let pt, km;
     if(g.type==='Point'){ pt=g.coordinates; km=havKm(lat,lon,pt[1],pt[0]); }
     else {
@@ -1563,7 +1579,7 @@ function sitrepTick(){
       pt=ne.pt; km=inside?0:ne.km;
     }
     if(!pt) return;
-    items.push({cfg,f,pt,cls,tier,inside,km});
+    items.push({cfg,f,pt,cls,tier,inside,km,det});
   }));
   // A named airspace zone (esp. Class B) arrives as many same-name shelf
   // polygons — collapse them to the NEAREST single card per class+name.
@@ -1574,12 +1590,12 @@ function sitrepTick(){
   const shown=items.filter(it=>it.cfg.src!=='airspace'||nearestAsp.get(aspKey(it))===it);
   shown.sort((a,z)=>a.tier-z.tier||a.km-z.km);
   const ITEM_CAP=14;
-  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside})=>{
-    const det=cfg.detail?cfg.detail(f):'';
+  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,det})=>{
+    const detTxt=det!=null?det:(cfg.detail?cfg.detail(f):'');
     const ic=typeof cfg.icon==='function'?cfg.icon(f):cfg.icon;
     cards.push([cls, ic,
       cfg.head(f), (cfg.sub?cfg.sub(f):'')||'—',
-      (inside?'overhead':dirMi(pt[1],pt[0]))+(det?' · '+det:''),
+      (inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:''),
       llBtn(pt[0],pt[1]), cfg.hazard]);
   });
   general.forEach(c=>cards.push(c));   // area-wide context cards sink to the bottom
@@ -2024,6 +2040,10 @@ function flyComputeDetail(){
     u:i===grid.length-1?'mph':''}));
   const gustSt=gustCells.length&&gustCells[0].st==='bad'?'bad':'';
   return {board:{colLabels,gustCells,gustSt,altRows},
+    // aspCapFt: the LAANC ceiling gate — -1 = grounds (no-fly), <400 = caps,
+    // 400 = no limit. aspUnknown = the FAA query failed (fail-open). Read by the
+    // SITREP so a controlled-airspace card you're OVERHEAD reflects the real cap.
+    aspCapFt, aspUnknown:asp==null,
     grid:grid.map(g=>({n:g.n,maxFly:g.maxFly,grounded:g.grounded,reason:g.reason,reasonAlt:g.reasonAlt}))};
 }
 

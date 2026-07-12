@@ -68,8 +68,10 @@ context cards):
   agree.
 - 🚨 emergency squawks (7700/7600/7500) · ⚠️ NWS **warnings** (not watches) ·
   ⛔/⚠️ FAA restrictions (defense, prohibited, security, MOA, stadium…) ·
-  🏞️ NPS land · 🗼 controlled airspace (Class B/C/D/E — authorization info,
-  not a hazard) · ✈️ / 🪖 civil and military traffic
+  🏞️ NPS land · 🗼 controlled airspace (Class B/C/D/E — neutral
+  authorization info when you're near it, but when you're **overhead** it the
+  card turns red "no-fly" / amber "ceiling N ft" to match the chart's LAANC
+  ceiling) · ✈️ / 🪖 civil and military traffic
 - Context cards at the bottom: 🌪️/⛈️ SPC Day-1 outlooks, 🧲 geomagnetic
   storms (Kp ≥ 5), ☀️ M/X solar flares, and the 🌡️ local forecast (always
   present).
