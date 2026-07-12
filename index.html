@@ -843,7 +843,8 @@ defLayer({
       if(!f.geometry) return;             // needs an area polygon to draw
       feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'nws',
         event:ev,severity:p.severity||'',area:p.areaDesc||'',ends:p.ends||p.expires||'',
-        _col:/Extreme/i.test(p.severity)?'#ff2d55':/Severe/i.test(p.severity)?'#ff6a3d':'#ffb454'}});
+        // outline matches the SITREP card's tier: Extreme/Severe = red, else amber
+        _col:/Extreme|Severe/i.test(p.severity)?'#ff4455':'#ffb454'}});
     });
     return {type:'FeatureCollection',features:feats};
   }
@@ -1383,7 +1384,9 @@ function setLocIcon(locked){
 // Locking disables map panning so the crosshair can't be dragged off you — zoom
 // still works; unlocking re-enables the drag. No fix yet → first tap kicks off
 // location. locMode: 0 idle · 1 centered · 2 locked (following).
-let locMode=0;
+// Start ARMED at 1 (centered): load auto-locates + frames on you, so the first tap
+// LOCKS — from there it follows the chain (unlock → center → lock → …).
+let locMode=1;
 function setPanLock(on){ try{ on?gl.dragPan.disable():gl.dragPan.enable(); }catch(e){} }
 function centerOnMe(){
   if(USER.lat==null){ toast('LOCATING…'); locate(); return; }

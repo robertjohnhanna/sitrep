@@ -180,7 +180,7 @@ gate input.
 | Aircraft (250 nm around centre, civil) | airplanes.live → adsb.fi fallback | on move · 15 s |
 | Military aircraft (worldwide) | ADS-B `/mil` | 15 s |
 | Emergency squawks (worldwide) | ADS-B `/squawk` | 15 s |
-| NWS warning polygons (US) | api.weather.gov | 15 s |
+| NWS warning polygons (US) — red outline for Extreme/Severe, amber otherwise | api.weather.gov | 15 s |
 | NEXRAD reflectivity mosaic | Iowa State Mesonet | 15 s |
 | SPC Day-1 outlook (hidden; feeds cards) | NOAA SPC | 15 min |
 | FAA airspace + restrictions (regional cache) | FAA ArcGIS ×5 services | on travel |
@@ -218,11 +218,12 @@ and a tap forces an immediate refresh.
 On load: instant IP fix (ipwho.is), refined by browser GPS if you allow the
 prompt (denial is silently tolerated), then one clean camera move framing 3×
 the range ring. A continuous geolocation **watch** keeps the green **you-are-here
-dot live** as you move. The ⌖ button **cycles**: first tap **centers** on you
-(keeps your zoom), second tap **locks + follows** — the crosshair sticks to your
-live position (map panning is disabled so you can't drag off yourself; zoom still
-works) and the icon becomes a 🔒 padlock — and a third tap **unlocks** (releases
-panning, icon back to the crosshair); the chain then repeats. GPS jitter is tamed so a locked
+dot live** as you move. The ⌖ button **cycles** through center → lock → unlock.
+Since load already auto-locates and frames on you, the button starts **armed**:
+the **first tap locks + follows** — the crosshair sticks to your live position
+(map panning is disabled so you can't drag off yourself; zoom still works) and the
+icon becomes a 🔒 padlock. The next tap **unlocks** (releases panning, icon back
+to the crosshair), the next **centers** you again, then locks — the chain repeats. GPS jitter is tamed so a locked
 map doesn't fidget: fixes reported worse than ~100 m are dropped, the position is
 EMA-smoothed so the dot glides, and the follow only recenters once you've actually
 moved ~18 m (a big jump snaps instantly, no lag). Position is resolved client-side
