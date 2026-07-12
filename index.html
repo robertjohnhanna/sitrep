@@ -2016,6 +2016,7 @@ function setRange(mi){
   try{ localStorage.setItem(RNG_KEY,String(RNG.mi)); }catch(e){}
   flyRenderSettings();   // update the displayed value in the settings box
   updateRing();          // resize the on-map range ring to match
+  enforceRingZoom();     // re-cap zoom so the resized ring still fits in 1/3 of the view
   flyPaint(); scheduleSitrep();
   clearTimeout(rngFetchTimer);
   rngFetchTimer=setTimeout(flyRefresh,700);
@@ -2138,6 +2139,25 @@ function updateRing(){
 function scheduleRing(){ if(_ringRaf) return; _ringRaf=requestAnimationFrame(()=>{ _ringRaf=0; updateRing(); }); }
 gl.on('move',scheduleRing);
 
+// Keep the range ring at 1/3 of the view at most: the smallest on-screen extent
+// must always be at least 3× the ring radius (ring DIAMETER ≤ 1/3 of that span).
+// We enforce this as a dynamic MAX ZOOM — the zoom at which a 3×-radius box just
+// fills the padded viewport. Zooming in past it is blocked (the center-anchored
+// zoom clamp reads getMaxZoom), and widening the range or panning north auto-eases
+// the camera back out. Recomputed on latitude change / resize / range change since
+// the mile↔zoom relationship depends on cos(lat) and the pixel viewport.
+function enforceRingZoom(){
+  const c=gl.getCenter(), km=3*RNG.mi*MI_TO_KM;
+  const dLat=km/111.32, dLon=km/(111.32*Math.max(0.2,Math.cos(c.lat*Math.PI/180)));
+  let z;
+  try{ const cam=gl.cameraForBounds([[c.lng-dLon,c.lat-dLat],[c.lng+dLon,c.lat+dLat]],{padding:_pad||0}); z=cam&&cam.zoom; }catch(e){}
+  if(z==null||!isFinite(z)) return;
+  const cap=Math.max(gl.getMinZoom(),Math.min(16,z));
+  if(Math.abs(gl.getMaxZoom()-cap)>0.02){ cancelCenterZoom(); gl.setMaxZoom(cap); }
+}
+gl.on('moveend',enforceRingZoom);
+gl.on('resize',enforceRingZoom);
+
 /* =====================================================================
    13. BOOT
    ===================================================================== */
@@ -2153,6 +2173,7 @@ gl.on('load',()=>{
   gl.addLayer({id:'ly-ring',type:'line',source:'src-ring',
     paint:{'line-color':'#2fe07a','line-width':1.5,'line-opacity':0.72,'line-dasharray':[2,2]}});
   updateRing();
+  enforceRingZoom();   // establish the initial ring-≤-1/3 max-zoom cap
   bindLayerPopups();
   // Pull every layer once on load (kept layers stay on the map; SPC feeds the
   // SITREP outlook card only).
@@ -2163,6 +2184,7 @@ gl.on('load',()=>{
   loadXray(); setInterval(loadXray,180000); // space weather: GOES X-ray flare (SITREP card)
   loadWeather(true);   // weather forecast: the always-present bottom SITREP card
   setMapPadding();
+  enforceRingZoom();   // recompute the cap now that desktop panel padding is applied
   flyRenderSettings(); flyRender(); flyRefresh();   // settings box + skeleton now, first data pull immediately
   locate();
   sitrepTick(); // SITREP works off the map area, even before a location fix
