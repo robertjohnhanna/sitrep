@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0e14">
+<meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="canifly">
@@ -340,7 +340,7 @@
        map-centre crosshair on the same unified data-refresh pulse. -->
   <div id="fly-pane">
     <div id="fly-board" class="board" role="group" aria-label="Can I Fly? drone preflight"></div>
-    <div id="fly-settings" class="fset" aria-label="Preflight settings"></div>
+    <div id="fly-settings" aria-label="Preflight settings"></div>
   </div>
   <div id="sit-body">
     <div class="sit-empty">ACQUIRING POSITION…</div>
@@ -423,8 +423,8 @@ async function adsb(path){
 }
 // Aircraft near the MAP CENTRE — one single 250-nm point query, nothing fancy.
 // The readsb mirrors cap point queries at 250 nm; that one circle around the
-// centre is plenty and dead reliable. Refetched on every map move and once a
-// minute. adsb() throws if every mirror is unreachable, which the runtime
+// centre is plenty and dead reliable. Refetched on every map move and every
+// 30 s pulse. adsb() throws if every mirror is unreachable, which the runtime
 // treats as an error (keeps the planes already on the map + retries) rather
 // than a "zero aircraft" wipe.
 async function adsbViewport(){
@@ -447,25 +447,13 @@ const acPopup=p=>`<h4>${p.mil?'🎖':'✈'} ${escapeHtml(p.flight)}</h4>
   ${p.desc?`<div class="kv"><span>aircraft</span>${escapeHtml(p.desc)}</div>`:
     `<div class="kv"><span>type</span>${escapeHtml(p.type)}</div>`}
   ${p.op?`<div class="kv"><span>operator</span>${escapeHtml(p.op)}</div>`:''}
-  <div class="kv"><span>alt</span>${p.alt} ft</div>
+  <div class="kv"><span>alt</span>${p.alt==='ground'?'on ground':p.alt+' ft'}</div>
   <div class="kv"><span>speed</span>${p.spd} kt${p.trk!=null?' · '+p.trk+'°':''}</div>
   <div class="kv"><span>squawk</span>${escapeHtml(p.sq||'—')}</div>
   <div class="kv"><span>hex</span>${escapeHtml(p.hex)}</div>`;
 // Features last loaded for a layer id — read from our own LAYER_STATE, never
 // from MapLibre's private source internals (which can break on any upgrade).
 function featsIn(id){const st=LAYER_STATE[id];return (st&&st.features)||[];}
-// Bounds of the map area actually VISIBLE — i.e. left of the docked SITREP
-// panel on the right. gl.getBounds() spans the whole canvas including the strip
-// hidden under that panel, so it over-counts "in view". On mobile the panel is
-// an overlay sheet, so the full canvas is the visible area.
-function viewBounds(){
-  const cv=gl.getCanvas();
-  const w=cv.clientWidth, h=cv.clientHeight;
-  const r=MQ_MOBILE.matches ? w : w-Math.min(320,w*0.4);
-  const bb=new maplibregl.LngLatBounds();
-  [[0,0],[r,0],[r,h],[0,h]].forEach(pt=>bb.extend(gl.unproject(pt)));
-  return bb;
-}
 // STATIC REGIONAL CACHE — airspace/NPS barely change (56-day chart cycle) and
 // the FAA service can't return the whole US in one shot (~50 MB, times out) and
 // ignores server generalisation, so we can't "pull the entire thing". Instead we
@@ -683,7 +671,7 @@ function registerIcons(){
 /* =====================================================================
    3. LAYER DEFINITIONS
    Each: id, label, color, refresh (sec), loader() -> GeoJSON (or null =
-   "no update — keep what's loaded", used by the zoom gates), popup(props).
+   "no update — keep what's loaded"), popup(props).
    geom:'fill' draws polygons (colored = per-feature _col); everything else
    is a symbol layer using `icon` (+ rotate/_rot). viewport:true refetches
    on every view change; defaultOff hides the fill on the map while the
@@ -702,7 +690,7 @@ defLayer({
   viewport:true,   // data is scoped to the map area → refetch on every view change
   icon:'ac-near', rotate:true, iconSize:0.6,
   // every civil (non-military) aircraft in the current map area; refetched on
-  // pan/zoom (see moveend) and once a minute
+  // pan/zoom (see moveend) and every 30 s pulse
   loader: async ()=>
     ({type:'FeatureCollection',
       features:acFeatures(await adsbViewport(),'nearair').filter(f=>!f.properties.mil)}),
@@ -723,6 +711,11 @@ defLayer({
     // 7700 = general emergency, 7600 = radio failure, 7500 = unlawful interference
     const codes=['7700','7600','7500'];
     const results=await Promise.allSettled(codes.map(c=>adsb('/squawk/'+c)));
+    // ALL three queries down = a feed outage, not "zero emergencies" — throw so
+    // the runtime keeps the last-good aircraft and retries (the loader contract).
+    // A single failed code still returns the others: that plane's regular
+    // civil/mil card takes over until the next 30s pull.
+    if(results.every(r=>r.status!=='fulfilled')) throw results[0].reason;
     const feats=[];
     results.forEach((r,i)=>{
       if(r.status!=='fulfilled') return;
@@ -739,7 +732,7 @@ defLayer({
   popup:p=>`<h4 style="color:var(--danger)">🚨 SQUAWK ${p.code}</h4>
     <div class="kv"><span>flight</span>${escapeHtml(p.flight)}</div>
     <div class="kv"><span>aircraft</span>${escapeHtml(p.desc||p.type)}</div>
-    <div class="kv"><span>alt</span>${p.alt} ft</div>
+    <div class="kv"><span>alt</span>${p.alt==='ground'?'on ground':p.alt+' ft'}</div>
     <div class="kv"><span>meaning</span>${p.code==='7700'?'emergency':p.code==='7600'?'radio failure':'unlawful interference'}</div>`
 });
 
@@ -1407,7 +1400,10 @@ const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));
 //   head   : line 1 — the item's headline
 //   sub    : line 2 — secondary detail
 //   detail : appended to line 3 after the distance (extra datum; '' to omit)
-const ALT=f=>{const a=f.properties.alt;return a!=null&&a!=='?'?a+U(' ft'):'—';};
+// readsb reports alt_baro:'ground' for taxiing aircraft — show that as a word,
+// never "ground ft". planesNear/TRFC already skip it (+'ground' → NaN).
+const ALT=f=>{const a=f.properties.alt;
+  return a==='ground'?'on ground':a!=null&&a!=='?'?a+U(' ft'):'—';};
 // hexes currently squawking an emergency — the same airframe also appears in
 // the civil/military feeds, so those cards filter against this set (the 🚨
 // card is the one card for that aircraft). Rebuilt at the top of sitrepTick.
@@ -1678,7 +1674,7 @@ $('#sit-body').addEventListener('click',e=>{ const b=e.target.closest('[data-act
 // Viewport-scoped feeds refetch for the new area whenever the visible bounds
 // change — on every map move AND on every container resize. A resize (window,
 // panel, orientation, sheet) enlarges the view without a pan, so without this
-// the newly-revealed area kept its stale aircraft until the next 60s refresh.
+// the newly-revealed area kept its stale aircraft until the next pulse.
 let moveDebounce=null, lastViewKey=null;
 function refreshViewport(){
   clearTimeout(moveDebounce);
@@ -1986,12 +1982,12 @@ window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // d
 // Hard airspace restriction under the crosshair, read from the loaded map layer:
 // a Prohibited area (PROH) or a national-security UAS zone (NSUF) that grounds the
 // chart. Defense zones are excluded here — the canifly FAA cap already grounds
-// those. The layer only FETCHES zoomed in (≥z7), but its data is KEPT across
-// zoom-outs (the loader's null "no update" contract) so a grounding zone under
-// the crosshair can't silently vanish when the view widens; the authoritative
-// canifly point-query still runs regardless. Advisory zones (Restricted/MOA/
-// Warning/Alert/stadium) never ground the chart — they may be schedule-only, so
-// they stay on the map + SITREP with a "verify" note.
+// those. The layer is a static regional cache (pulled once for a box around the
+// crosshair, kept at every zoom, re-pulled only on travel) so a grounding zone
+// under the crosshair can't silently vanish when the view widens; the
+// authoritative canifly point-query still runs regardless. Advisory zones
+// (Restricted/MOA/Warning/Alert/stadium) never ground the chart — they may be
+// schedule-only, so they stay on the map + SITREP with a "verify" note.
 function flyRestriction(){
   const c=gl.getCenter(); let hit=null;
   featsIn('airspace').forEach(f=>{
