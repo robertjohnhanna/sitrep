@@ -46,9 +46,6 @@
     --sa-t:env(safe-area-inset-top,0px); --sa-b:env(safe-area-inset-bottom,0px);
     --sa-l:env(safe-area-inset-left,0px); --sa-r:env(safe-area-inset-right,0px);
     --topbar-h:var(--sa-t);
-    /* mobile bottom-nav height. Text-only tabs (no icons) → a slim bar, so the
-       SITREP sheet gets the maximum vertical room. */
-    --navh:42px;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   /* Full viewport height so the bottom nav anchors to the true bottom of the
@@ -282,41 +279,41 @@
     border:2.5px solid #fff;box-shadow:0 0 0 0 rgba(47,224,122,.6);animation:pulse 2.2s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,224,122,.6)}70%{box-shadow:0 0 0 16px rgba(47,224,122,0)}100%{box-shadow:0 0 0 0 rgba(47,224,122,0)}}
 
-  /* ---------- mobile bottom navigation + sheets ---------- */
-  #mnav{display:none}
+  /* ---------- mobile bottom sheet ---------- */
+  #sheet-handle{display:none}
+  /* one-time add-to-home-screen hint (shown via JS on iOS Safari) */
+  #a2hs{position:absolute;z-index:40;top:calc(var(--sa-t) + 10px);left:50%;
+    transform:translateX(-50%);max-width:min(340px,90vw);display:flex;align-items:center;gap:8px;
+    background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:8px 10px;font-size:12px;color:var(--ink);line-height:1.35;
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 24px #000a}
+  #a2hs b{color:var(--accent);font-weight:700}
+  #a2hs-x{flex:0 0 auto;background:none;border:none;color:var(--ink-dim);font-size:15px;
+    padding:0 2px;line-height:1;cursor:pointer}
+  #a2hs[hidden]{display:none}
   @media (max-width:1000px){
-    /* map stops at the nav bar so no tiles bleed under it */
-    #map{bottom:calc(var(--navh) + var(--sa-b))}
-    #mnav{position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;
-      height:calc(var(--navh) + var(--sa-b));padding:0 var(--sa-r) var(--sa-b) var(--sa-l);
-      background:#000;border-top:1px solid var(--line)}
-    /* text-only tabs (icons dropped) — a single slim line to reclaim sheet space */
-    #mnav button{flex:1;background:none;border:none;color:var(--ink-dim);
-      font-size:12px;letter-spacing:1px;display:flex;
-      align-items:center;justify-content:center}
-    #mnav button.active{color:var(--accent)}
-    /* Selected panel fills the whole screen (down to the nav bar) and scrolls
-       internally. It's opaque and, when closed, fully HIDDEN (visibility) so a
-       closed panel can never leak its rows into the strip below the nav. Top
-       padding is just the safe-area inset (the notch when installed; 0 in a
-       Safari tab, where the web content already sits below Safari's chrome — a
-       hard 54px fallback here was what made the header look absurdly tall). */
-    .panel{left:0!important;right:0!important;top:0!important;width:auto!important;
-      bottom:calc(var(--navh) + var(--sa-b))!important;max-height:none!important;z-index:20;
-      padding-top:var(--sa-t)!important;background:var(--bg);
-      backdrop-filter:none;-webkit-backdrop-filter:none;
-      border-radius:0;border:none;visibility:hidden;
-      transform:translateY(100%);
-      /* No animation either way — the sheet just appears / disappears. */
-      transition:none;
-      box-shadow:0 -12px 40px #000a}
-    .panel.open{transform:translateY(0);visibility:visible}
-    /* map is full-width on mobile; centre the control above the bottom nav */
+    /* map is full height; the sheet floats over it */
+    #map{bottom:0}
+    /* the CANIFLY panel becomes a drag-up bottom sheet. Height is set by JS to fit
+       the snap positions; transform (the snap) is set by JS too. */
+    .panel{left:0!important;right:0!important;top:0!important;bottom:auto!important;
+      width:auto!important;height:100vh;z-index:20;padding:0!important;
+      background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+      border:none;border-radius:16px 16px 0 0;box-shadow:0 -14px 40px #000b;
+      transform:translateY(100%);   /* JS replaces this with the snap position */
+      transition:transform .28s cubic-bezier(.22,.61,.36,1);visibility:visible}
+    .panel.dragging{transition:none}   /* live-follow the finger, no lag */
+    /* grab handle at the very top of the sheet (also the primary drag surface) */
+    #sheet-handle{display:block;flex:0 0 auto;padding:9px 0 5px;touch-action:none;cursor:grab}
+    #sheet-handle::before{content:"";display:block;width:38px;height:5px;margin:0 auto;
+      border-radius:3px;background:var(--ink-dim);opacity:.6}
+    #sit-head{touch-action:none}       /* the title bar is a drag surface too */
+    #sit-body{padding-bottom:calc(var(--sa-b) + 6px)}
+    /* floating map controls sit just above the collapsed peek (--peek set by JS) */
     #ctrl-wrap{left:calc(14px + var(--sa-l));right:calc(14px + var(--sa-r));
-      bottom:calc(var(--navh) + var(--sa-b) + 14px)}
+      bottom:calc(var(--peek,84px) + var(--sa-b) + 12px)}
     #load-ring{left:calc(14px + var(--sa-l));top:calc(var(--sa-t) + 12px)}
-    /* full map width, sat just above the bottom nav */
-    #map-attrib{right:0;bottom:calc(var(--navh) + var(--sa-b) + 3px)}
+    #map-attrib{right:0;bottom:calc(var(--peek,84px) + var(--sa-b) + 2px)}
   }
 </style>
 </head>
@@ -334,12 +331,13 @@
   <circle cx="15" cy="15" r="1.3" fill="#fff"/>
 </svg>
 
-<!-- SITREP briefing panel (right) — top to bottom: the SITREP title + refresh
-     timer, then the canifly chart, the settings box, then the SITREP cards. The
-     scrollable card list stays at the bottom for thumb reach. -->
+<!-- CANIFLY panel — desktop: docked right. Mobile: a drag-up bottom sheet over
+     the map (grab handle on top). Top to bottom: title + refresh timer, the
+     flyability chart + settings, then the SITREP cards (scroll). -->
 <div id="sitrep" class="panel">
+  <div id="sheet-handle" title="drag to resize" aria-hidden="true"></div>
   <div id="sit-head">
-    <span class="title" id="sit-title">◈ SITREP</span>
+    <span class="title" id="sit-title">◈ CANIFLY</span>
     <span id="sit-load" aria-hidden="true" title="loading data…"></span>
     <span id="refresh-badge" role="button" tabindex="0" title="tap to refresh now"><b id="refresh-count">30</b>s to update</span>
   </div>
@@ -370,10 +368,10 @@
   <button type="button" class="cb-btn cb-plus" id="rng-plus" aria-label="Increase range half a mile"></button>
 </div></div>
 
-<!-- mobile bottom navigation (data-p stays the internal panel id) -->
-<div id="mnav">
-  <button data-p="" class="active">MAP</button>
-  <button data-p="sitrep">CANIFLY</button>
+<!-- one-time "add to home screen" hint (iOS Safari, not standalone) -->
+<div id="a2hs" hidden>
+  <span>Add to Home Screen for full-screen — <b>Share</b> ▸ <b>Add to Home Screen</b>.</span>
+  <button id="a2hs-x" type="button" aria-label="dismiss">✕</button>
 </div>
 
 <div id="toast"></div>
@@ -1717,7 +1715,7 @@ function handleAct(btn){
     // zoom IN to at least 9 but never zoom the user OUT of a closer view
     if(isFinite(lo)&&isFinite(la)){ cancelCenterZoom();
       gl.flyTo({center:[lo,la],zoom:Math.max(gl.getZoom(),9)}); }
-    if(MQ_MOBILE.matches) openSheet('');
+    if(MQ_MOBILE.matches&&window.sheetSnap) window.sheetSnap('collapsed');   // drop the sheet to reveal the map
   } else if(act==='open'&&btn.dataset.url){ window.open(btn.dataset.url,'_blank','noopener'); }
   else if(act==='refresh'){ forceRefresh(); }   // DATA card → force a full refresh
 }
@@ -1766,15 +1764,74 @@ gl.on('moveend',refreshViewport);
 // container resize doesn't reliably fire moveend, so refetch here too
 gl.on('resize',refreshViewport);
 
-// mobile: MAP / SITREP bottom nav toggles the SITREP sheet
-const mnavBtns=document.querySelectorAll('#mnav button');
-function openSheet(which){
-  $('#sitrep').classList.toggle('open',which==='sitrep');
-  mnavBtns.forEach(b=>b.classList.toggle('active',b.dataset.p===which));
-}
-mnavBtns.forEach(b=>b.addEventListener('click',()=>openSheet(b.dataset.p)));
-// tapping the map closes any open sheet (mobile only; harmless on desktop)
-gl.on('dragstart',()=>{ if(MQ_MOBILE.matches) openSheet(''); });
+// ---- MOBILE BOTTOM SHEET — the CANIFLY panel drags up from the bottom over the
+//      map, snapping between COLLAPSED (a title strip, map dominant), MID (the
+//      flyability chart), and FULL (chart + all cards, scrolling). The grab
+//      handle and the title bar are the drag surfaces; the card list scrolls on
+//      its own. Desktop keeps the docked-right panel untouched (guarded by MQ). --
+(function sheetCtl(){
+  const sheet=$('#sitrep'), handle=$('#sheet-handle'), head=$('#sit-head'), flyPane=$('#fly-pane');
+  const ORDER=['collapsed','mid','full'];
+  const FULL_INSET=40;                 // px of map left showing at the top when FULL
+  let snap={collapsed:0,mid:0,full:FULL_INSET}, cur='collapsed';
+  function measure(){
+    const H=window.innerHeight, SH=Math.max(160,H-FULL_INSET);
+    sheet.style.height=SH+'px';
+    const peek=handle.offsetHeight+head.offsetHeight;         // COLLAPSED shows this
+    const chart=peek+flyPane.offsetHeight;                    // MID shows chart too
+    snap={ full:FULL_INSET, mid:Math.max(FULL_INSET,H-chart), collapsed:Math.max(FULL_INSET,H-peek) };
+    document.documentElement.style.setProperty('--peek',peek+'px');
+  }
+  function applySnap(name,animate){
+    cur=name;
+    if(animate){ sheet.classList.remove('dragging'); }
+    else { sheet.classList.add('dragging');
+      requestAnimationFrame(()=>requestAnimationFrame(()=>sheet.classList.remove('dragging'))); }
+    sheet.style.transform='translateY('+snap[name]+'px)';
+  }
+  function setSnap(name){ if(!MQ_MOBILE.matches) return; measure(); applySnap(name,true); }
+  window.sheetSnap=setSnap;   // used by handleAct (fly-to → collapse)
+  // ---- drag ----
+  let y0=0, t0=0, base=0, live=0, dragging=false, moved=false, when=0;
+  function begin(y){ measure(); dragging=true; moved=false; y0=y; base=snap[cur]; live=base;
+    when=Date.now(); sheet.classList.add('dragging'); }
+  function move(y){ if(!dragging) return; const dy=y-y0; if(Math.abs(dy)>4) moved=true;
+    live=Math.max(snap.full,Math.min(snap.collapsed,base+dy)); sheet.style.transform='translateY('+live+'px)'; }
+  function end(y){ if(!dragging) return; dragging=false;
+    if(!moved){ applySnap(ORDER[(ORDER.indexOf(cur)+1)%ORDER.length],true); return; }   // tap = cycle up
+    const v=(y-y0)/Math.max(1,Date.now()-when);      // px/ms (+ = downward flick)
+    const target=live+v*130;                          // project the flick a little
+    const best=ORDER.map(n=>[n,snap[n]]).sort((a,b)=>Math.abs(a[1]-target)-Math.abs(b[1]-target))[0][0];
+    applySnap(best,true);
+  }
+  const drag=el=>{
+    el.addEventListener('pointerdown',e=>{ if(!MQ_MOBILE.matches) return;
+      if(e.target.closest('#refresh-badge')) return;   // keep the refresh badge tappable
+      begin(e.clientY); try{el.setPointerCapture(e.pointerId);}catch(_){}; });
+    el.addEventListener('pointermove',e=>move(e.clientY));
+    el.addEventListener('pointerup',e=>end(e.clientY));
+    el.addEventListener('pointercancel',e=>end(e.clientY));
+  };
+  drag(handle); drag(head);
+  window.addEventListener('resize',()=>{
+    if(MQ_MOBILE.matches){ measure(); applySnap(cur,false); }
+    else { sheet.style.transform=''; sheet.style.height=''; sheet.classList.remove('dragging'); }
+  });
+  if(MQ_MOBILE.matches) requestAnimationFrame(()=>setSnap('collapsed'));   // start map-dominant
+})();
+
+// ---- one-time "Add to Home Screen" hint (iOS Safari tab only). Installed
+//      (standalone) the app owns the whole screen — no Safari chrome — so the
+//      hint reclaims that space. Dismiss persists per device. --
+(function a2hs(){
+  const el=$('#a2hs'); if(!el) return;
+  const iOS=/iP(hone|od|ad)/.test(navigator.platform)||(/Mac/.test(navigator.platform)&&navigator.maxTouchPoints>1);
+  const standalone=navigator.standalone===true||matchMedia('(display-mode:standalone)').matches;
+  let dismissed=false; try{ dismissed=localStorage.getItem('canifly.a2hs')==='1'; }catch(e){}
+  if(iOS&&!standalone&&!dismissed&&MQ_MOBILE.matches) el.hidden=false;
+  $('#a2hs-x').addEventListener('click',()=>{ el.hidden=true;
+    try{ localStorage.setItem('canifly.a2hs','1'); }catch(e){} });
+})();
 
 /* =====================================================================
    8. CAN I FLY — the canifly drone-preflight chart, FULLY INTEGRATED.

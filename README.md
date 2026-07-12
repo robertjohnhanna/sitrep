@@ -4,12 +4,13 @@
 that answers it for wherever the crosshair points.**
 
 A self-contained HTML app: a dark map with a centre crosshair and a docked
-panel (a bottom sheet on mobile). The panel leads with the **flyability
-chart** — can a small drone fly *here, now, and for the next three hours, and
-how high* — plus a max-wind setting (and a range stepper on the map) and a **SITREP** briefing: a
-stack of distance-sorted cards for everything inside the range ring — low
-manned traffic, FAA airspace ceilings, NWS warnings, park no-fly land,
-severe-weather outlooks, space weather, and the local forecast.
+panel (on mobile, a **drag-up bottom sheet** over the map that snaps between a
+collapsed title strip, the chart, and full cards). The panel leads with the
+**flyability chart** — can a small drone fly *here, now, and for the next three
+hours, and how high* — plus a max-wind setting (and a range stepper on the map)
+and a **SITREP** briefing: a stack of distance-sorted cards for everything
+inside the range ring — low manned traffic, FAA airspace ceilings, NWS warnings,
+park no-fly land, severe-weather outlooks, space weather, and the local forecast.
 
 No backend. No build step. No API keys. No `npm install`. **Open `index.html`
 directly in a browser.** Fully responsive — iPhone, iPad, and desktop.
@@ -148,6 +149,12 @@ pulse. Every loader retries with backoff and a failure never wipes the map.
 The map has **no click popups** — everything inside the range ring is described
 by the SITREP cards, so the map stays a clean picture and the panel carries the
 detail.
+
+**Mobile:** the panel is a drag-up bottom sheet. Drag its grab handle (or tap it
+to cycle) between *collapsed* (a CANIFLY title strip over a full map), *chart*,
+and *full cards*; tapping a card flies the map there and drops the sheet. On an
+iOS Safari tab a one-time hint offers **Add to Home Screen** for a full-screen,
+chrome-free install.
 
 ## Location & privacy
 
