@@ -36,7 +36,7 @@ code in the cell where the limit bites:
 | GUST | surface gust ≥ max wind | Open-Meteo |
 | VIS | visibility < 3 SM (Part 107) | Open-Meteo |
 | SKY | cloud base − 500 ft clearance caps the ceiling | Open-Meteo (pressure-level decks + LCL) |
-| KPx | planetary Kp ≥ 5 (GPS/compass risk), forecast bin per hour | NOAA SWPC |
+| KPx | planetary Kp ≥ 7 (G3, GPS degraded) grounds; Kp 5–6 (G1–G2) is an amber caution. NOW uses the finalized observed bin; +1/+2/+3h use the forecast | NOAA SWPC |
 | FAA | LAANC grid ceiling caps the band; a National-Defense TFR in range grounds | FAA ArcGIS (point + range buffer) |
 | PROH / NSUF / PARK | Prohibited area, security UAS zone, or NPS land under the crosshair grounds | FAA ArcGIS · NPS |
 | PCPN | NEXRAD echo inside the range ring grounds NOW | Iowa State Mesonet mosaic (pixel-sampled) |
@@ -81,10 +81,12 @@ context cards):
   chart is FAA-limited — even where no charted-airspace polygon is in range
   (the LAANC grid's 0-ft cells follow approach corridors, not the drawn
   bubbles).
-- 🧲 **SPACE WEATHER** — a planetary Kp storm (Kp ≥ 5) grounds the chart's NOW
-  column because a geomagnetic storm degrades the GPS/compass a drone relies on.
-  Pinned and always **red** — whenever it shows, it *is* a grounding condition —
-  and it reads the same `kpNow` the chart's KP gate uses, so card and chart agree.
+- 🧲 **SPACE WEATHER** — a geomagnetic Kp storm degrades the GPS/compass a drone
+  relies on, right-sized to actual impact: **red grounding at Kp ≥ 7** (G3, where
+  NOAA flags GPS degradation), **amber caution at Kp 5–6** (G1–G2, accuracy may
+  drop but flyable). It reads the same `kpNow` the chart's KP gate uses — the
+  **finalized observed** value for NOW (the in-progress estimate is preliminary
+  and jumpy), forecasts for the +1/+2/+3h columns — so card and chart agree.
 - 📡 **DATA** — the flyability gates fail *open*, so an unverifiable feed keeps
   its last-good value and only ambers the NOW header quietly. If a feed stays
   stale past a ~35 s grace window (a self-healing blip won't pop it), this card

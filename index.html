@@ -1659,16 +1659,19 @@ function sitrepTick(){
       rangeTxt,openBtn(faaMapUrl(lat,lon)),true]);
   }
 
-  // -- SPACE WEATHER (pinned): a planetary Kp storm at/above the chart's kpMax
-  //    grounds the NOW column — a geomagnetic storm degrades the GPS/compass a
-  //    drone depends on. Always RED, because whenever it shows it IS a grounding
-  //    condition. Reads the SAME kpNow the chart's KP gate uses, so card and
-  //    chart can't disagree. (Unknown Kp → no card; the NOW header + title
-  //    already amber "unverified".) --
+  // -- SPACE WEATHER (pinned): a geomagnetic Kp storm degrades the GPS/compass a
+  //    drone relies on. Right-sized to actual drone impact (NOAA flags GPS
+  //    degradation only at G3): RED grounding at Kp ≥ kpGnd (G3+, nav unreliable),
+  //    AMBER caution at Kp ≥ kpCaut (G1–G2, accuracy may drop but flyable). Reads
+  //    the SAME kpNow the chart's KP gate uses (the finalized OBSERVED value for
+  //    NOW), so card and chart can't disagree. Quiet/unknown Kp → no card. --
   const kpNow=FLY.detail?FLY.detail.kpNow:null;
-  if(kpNow!=null && kpNow>=SPEC.kpMax){
+  if(kpNow!=null && kpNow>=SPEC.kpGnd){
     cards.push(['danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
       'GPS / compass unreliable',openBtn(SWPC),true]);
+  }else if(kpNow!=null && kpNow>=SPEC.kpCaut){
+    cards.push(['alert','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      'GPS accuracy may be reduced',openBtn(SWPC),true]);
   }
 
   // -- DATA HEALTH (pinned): the flyability gates fail OPEN — an unverifiable feed
@@ -1899,8 +1902,12 @@ const M_TO_FT=3.28084, FT_TO_M=0.3048, M_TO_SM=1/1609.34, KT_TO_MPH=1.15078, MI_
 const toMph=kt=>kt==null?null:kt*KT_TO_MPH;
 const comma=n=>Number(Math.round(n)).toLocaleString('en-US');
 const fmt=(n,d=0)=>(n==null||isNaN(n))?'–':Number(n).toFixed(d);
-// FAA Part 107 / physics limits — all fixed (see the canifly repo for rationale)
-const SPEC={kpMax:5,visSM:3,clrFt:500,regFt:400};
+// FAA Part 107 / physics limits — all fixed (see the canifly repo for rationale).
+// Kp thresholds are right-sized to a drone's GPS/compass risk, not raw storm
+// labels: NOAA's own G-scale only flags GPS degradation at G3 (Kp 7), so a G1–G2
+// (Kp 5–6) is an amber CAUTION (accuracy may drop) and G3+ (Kp ≥ 7) is a red
+// GROUNDING (nav unreliable). kpCaut = caution floor, kpGnd = grounding floor.
+const SPEC={kpCaut:5,kpGnd:7,visSM:3,clrFt:500,regFt:400};
 // The traffic warning altitude [ft AGL] — ONE number shared by the SITREP's
 // LOW AIRCRAFT card and the chart's TRFC cells, so they always agree.
 const WARN_AGL_FT=1000;
@@ -2004,7 +2011,10 @@ async function getKp(){
   const src=arrHdr?d.slice(1):d;
   const rows=src.map(r=>{
     const t=arrHdr?r[0]:r.time_tag, kp=Number(arrHdr?r[1]:r.kp);
-    return {ms:Date.parse((t||'').replace(' ','T')+'Z'), kp};
+    // 'observed' = finalized · 'estimated' = in-progress nowcast · 'predicted' =
+    // forecast. The NOW column uses the last finalized observed bin (see kpAt).
+    const obs=arrHdr?r[2]:r.observed;
+    return {ms:Date.parse((t||'').replace(' ','T')+'Z'), kp, obs};
   }).filter(x=>!isNaN(x.ms)&&!isNaN(x.kp)).sort((a,b)=>a.ms-b.ms);
   return rows.length?{rows}:null;
 }
@@ -2187,10 +2197,18 @@ function flyComputeDetail(){
   const one=kt=>kt==null?'—':fmt(toMph(kt),0);
   const cols=(aloft&&aloft.cols)||[];
   const nowMs=Date.now();
-  // Kp in force at hour n: the last forecast bin starting at or before that
-  // hour (bins are 3-hourly and time-sorted; before the first bin, use it).
+  // Kp in force at hour n: the last bin starting at or before that hour (bins are
+  // 3-hourly and time-sorted; before the first bin, use it). The NOW column
+  // (n=0) prefers the last FINALIZED observed bin — the in-progress bin is only an
+  // estimate and can be revised, so it shouldn't drive a nowcast; the +1/+2/+3h
+  // columns are inherently forecasts and use the estimated/predicted bins.
   const kpAt=n=>{
     if(!kp||!kp.rows||!kp.rows.length) return null;
+    if(n===0){
+      for(let i=kp.rows.length-1;i>=0;i--){
+        const r=kp.rows[i]; if(r.ms<=nowMs && r.obs==='observed') return r.kp;
+      }
+    }
     const t=nowMs+n*3600e3; let v=null;
     for(const r of kp.rows){ if(r.ms<=t) v=r.kp; else break; }
     return v!=null?v:kp.rows[0].kp;
@@ -2201,7 +2219,7 @@ function flyComputeDetail(){
     const prof=makeProfile(c.windPts);
     const visSM=c.visM!=null?c.visM*M_TO_SM:null;
     const kpv=kpAt(n);
-    const gGust=atLim(c.gustKt), gVis=visSM!=null&&visSM<SPEC.visSM, gKp=kpv!=null&&kpv>=SPEC.kpMax;
+    const gGust=atLim(c.gustKt), gVis=visSM!=null&&visSM<SPEC.visSM, gKp=kpv!=null&&kpv>=SPEC.kpGnd;
     // PCPN — radar is a NOW product, so only the NOW column can carry the gate
     const gPcpn=n===0&&FLY.precip===true;
     const globalGrounded=gGust||gVis||gKp||gPcpn||!!restrict;   // hard airspace grounds all hours
@@ -2236,11 +2254,16 @@ function flyComputeDetail(){
     return 'good';
   };
   const nowMaxFly=grid.length?grid[0].maxFly:-1;
-  // unverified gate inputs amber the NOW header (unknown ≠ clear) — grounded red wins
+  // NOW-column advisories amber the header (grounded red wins): unverified inputs
+  // (unknown ≠ clear) plus a G1–G2 geomagnetic caution (Kp 5–6, below the Kp-7
+  // grounding line) — degraded GPS/compass accuracy you can fly with, cautiously.
   const unk=flyUnknown();
+  const kpNowV=kpAt(0);
+  const kpCautNow=kpNowV!=null&&kpNowV>=SPEC.kpCaut&&kpNowV<SPEC.kpGnd;
+  const nowAdv=[...unk]; if(kpCautNow) nowAdv.push('Kp '+Math.round(kpNowV)+' storm');
   const colLabels=grid.map(g=>({v:g.n===0?'now':'+'+g.n+'h',
-    st:g.grounded?'bad':(g.n===0&&unk.length?'unk':''), now:g.n===0,
-    t:g.n===0&&unk.length?'unverified: '+unk.join(', ')+' — treat as advisory':''}));
+    st:g.grounded?'bad':(g.n===0&&nowAdv.length?'unk':''), now:g.n===0,
+    t:g.n===0&&nowAdv.length?'advisory: '+nowAdv.join(', ')+' — treat as advisory':''}));
   const topFt=ALTS[0];
   const altRows=ALTS.map(ft=>{
     const cells=grid.map(g=>{
