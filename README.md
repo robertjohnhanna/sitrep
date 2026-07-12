@@ -41,7 +41,7 @@ code in the cell where the limit bites:
 | FAA | LAANC grid ceiling caps the band; a National-Defense TFR in range grounds | FAA ArcGIS (point + range buffer) |
 | PROH / NSUF / PARK | Prohibited area, security UAS zone, or NPS land under the crosshair grounds | FAA ArcGIS · NPS |
 | PCPN | NEXRAD echo inside the range ring grounds NOW | Iowa State Mesonet mosaic (pixel-sampled) |
-| TRFC | manned aircraft in range under 1,000 ft AGL reds its altitude row in NOW | ADS-B |
+| TRFC | manned aircraft in range under 1,000 ft AGL reds (and flashes red/white) its altitude row in NOW | ADS-B |
 
 **Fail-safe posture:** a feed that can't be verified never silently reads
 "clear". Unknown inputs fail *open* for the grid values but amber the NOW
@@ -200,8 +200,9 @@ parameters to the public weather APIs.
   depends on its case (SI symbols, a mixed-case index) would stay verbatim.
 - An aircraft that breaches the range **and** the 1,000 ft AGL warning
   altitude flashes red/white on the map (a pulsing halo), in the SITREP
-  title, and on its LOW AIRCRAFT card. Tapping the "Xs to update" badge
-  forces an immediate refresh.
+  title, on its LOW AIRCRAFT card, and on the chart's **TRFC** cell (a TRFC
+  cell only appears while a plane breaches, so all four flash in sync).
+  Tapping the "Xs to update" badge forces an immediate refresh.
 - AGL is computed per plane: **QNH-corrected** barometric altitude (ADS-B
   reports pressure altitude off 29.92″; the local sea-level pressure from the
   weather feed corrects it, ~27 ft/hPa) minus the **ground elevation under that

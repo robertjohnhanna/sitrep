@@ -187,12 +187,14 @@
   #sit-title.alert{color:var(--warn)}
   #sit-title.warn{color:var(--danger)}
   /* EXTRA ALERT — an aircraft breaching the range+altitude threshold flashes the
-     SITREP title, its card headline and its map halo between red and white. */
+     SITREP title, its card headline, its map halo AND the chart's TRFC cell(s)
+     between red and white (a TRFC cell only appears while a plane breaches). */
   @keyframes acflash{0%,100%{color:var(--danger)}50%{color:#fff}}
   #sit-title.acflash{animation:acflash .9s ease-in-out infinite}
   .sit-row.acflash .s1{animation:acflash .9s ease-in-out infinite}
+  #fly-pane .gc.acflash{animation:acflash .9s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){
-    #sit-title.acflash,.sit-row.acflash .s1{animation:none}}
+    #sit-title.acflash,.sit-row.acflash .s1,#fly-pane .gc.acflash{animation:none}}
   /* Combined control: range steppers + center-on-me, in one box styled like the
      original center-on-me button but WHITE, not accent green (white border, text,
      glyphs; dark blurred bg; 42px tall). Layout: (−) RANGE ⌖ n.n MI (+). Centred
@@ -2223,7 +2225,7 @@ function flyComputeDetail(){
   const altRows=ALTS.map(ft=>{
     const cells=grid.map(g=>{
       if(g.reasonAlt===ft) return {v:g.reason, st:cellState(g,ft), rsn:true};   // the column's own code wins its cell
-      if(g.n===0&&traffic.has(ft)) return {v:'TRFC', st:'bad', rsn:true};       // traffic reds its altitude, NOW column
+      if(g.n===0&&traffic.has(ft)) return {v:'TRFC', st:'bad', rsn:true, flash:true};  // low traffic reds AND flashes its altitude, NOW column
       return {v:one(g.prof(ft)), st:cellState(g,ft)};
     });
     // hi = the bold "highest you can fly right now" label — suppressed when manned
@@ -2252,7 +2254,7 @@ function flyComputeDetail(){
 const FLY_GRID_ATTRS='class="grid"';
 function flyBoardHtml(b){
   const unit=u=>u?`<i class="gu">${u}</i>`:'';
-  const cell=c=>`<span class="gc${c.st?' '+c.st:''}${c.rsn?' rsn':''}">${c.v==null?'':c.v}${unit(c.u)}</span>`;
+  const cell=c=>`<span class="gc${c.st?' '+c.st:''}${c.rsn?' rsn':''}${c.flash?' acflash':''}">${c.v==null?'':c.v}${unit(c.u)}</span>`;
   const head=`<div class="grow ghead"><span class="ga"></span>${b.colLabels.map(l=>`<span class="gc${l.st?' '+l.st:''}${l.now?' now':''}"${l.t?` title="${escapeHtml(l.t)}"`:''}>${l.v}</span>`).join('')}</div>`;
   const alts=b.altRows.map(r=>`<div class="grow"><span class="ga${r.st?' '+r.st:''}${r.hi?' hi':''}">${r.a}${unit(r.u)}</span>${r.cells.map(cell).join('')}</div>`).join('');
   const gust=`<div class="grow ggust"><span class="ga${b.gustSt?' '+b.gustSt:''}">gust</span>${b.gustCells.map(cell).join('')}</div>`;
