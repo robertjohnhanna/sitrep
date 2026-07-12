@@ -1280,8 +1280,9 @@ const CATS=[
    head:f=>cut(f.properties.flight||f.properties.hex||'?',10),
    sub:f=>escapeHtml(f.properties.desc||f.properties.type||'military'), detail:ALT},
   // FAA airspace RESTRICTIONS — each in-view zone is a distance-sorted, tappable
-  // card (tap flies the map to it). Controlled airspace (Class B/C/D/E) is
-  // excluded: the chart's FAA ceiling already covers it and it would flood the list.
+  // card (tap flies the map to it). Restrictions (defense / prohibited / MOA /
+  // stadium / …) are red/amber hazards; controlled airspace (Class B/C/D/E) is a
+  // separate NEUTRAL card below (authorization, not a no-fly).
   {src:'src-airspace', hazard:true, filter:f=>f.properties.sev!=='ctrl',
    icon:f=>f.properties.sev==='hard'?'⛔':'⚠',
    cls:f=>f.properties.sev==='hard'?'danger':'alert',
@@ -1289,6 +1290,14 @@ const CATS=[
      MOA:'MILITARY OPS AREA',W:'WARNING AREA',A:'ALERT AREA',D:'DANGER AREA',STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
    detail:f=>f.properties.sev==='hard'?'drones prohibited':f.properties.cls==='STDM'?'during events':'verify NOTAMs'},
+  // Controlled airspace (Class B/C/D + surface E) in range — an informational
+  // card: drones need LAANC / ATC authorization here, but it isn't a no-fly, so
+  // it's neutral (no colour, doesn't drive the title severity). Deduped below so
+  // Class B's many same-name shelves collapse to one card.
+  {src:'src-airspace', hazard:false, filter:f=>f.properties.sev==='ctrl', icon:'🗼', cls:()=>'',
+   head:f=>({B:'CLASS B AIRSPACE',C:'CLASS C AIRSPACE',D:'CLASS D AIRSPACE',E:'CLASS E AIRSPACE'}[f.properties.cls]||'AIRSPACE'),
+   sub:f=>cut(f.properties.name||'—',26),
+   detail:()=>'authorization required'},
   // National Park Service lands — a drone no-fly (can't launch / land / operate).
   {src:'src-nps', hazard:true, icon:'🌲', cls:()=>'danger',
    head:f=>cut(f.properties.name||'NPS LAND',20),
@@ -1416,9 +1425,16 @@ async function sitrepTick(){
     if(!pt) return;
     items.push({cfg,f,pt,cls,tier,inside,km});
   }));
-  items.sort((a,z)=>a.tier-z.tier||a.km-z.km);
+  // A named airspace zone (esp. Class B) arrives as many same-name shelf
+  // polygons — collapse them to the NEAREST single card per class+name.
+  const nearestAsp=new Map();
+  const aspKey=it=>(it.f.properties.cls||'')+'|'+(it.f.properties.name||'');
+  items.forEach(it=>{ if(it.cfg.src!=='src-airspace') return;
+    const k=aspKey(it), ex=nearestAsp.get(k); if(!ex||it.km<ex.km) nearestAsp.set(k,it); });
+  const shown=items.filter(it=>it.cfg.src!=='src-airspace'||nearestAsp.get(aspKey(it))===it);
+  shown.sort((a,z)=>a.tier-z.tier||a.km-z.km);
   const ITEM_CAP=14;
-  items.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside})=>{
+  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside})=>{
     const det=cfg.detail?cfg.detail(f):'';
     const ic=typeof cfg.icon==='function'?cfg.icon(f):cfg.icon;
     cards.push([cls, ic,
