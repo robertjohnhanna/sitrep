@@ -1448,9 +1448,9 @@ function sitrepTick(){
     if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
     t.classList.toggle('acflash',acFlash);
   }}
-  // both rings track the verdict colour (green/amber/red); the dark casings stay fixed
+  // both rings track the verdict colour (green/amber/red); the black outlines stay fixed
   const sevCol=SEV_COL[titleSev]||SEV_COL[0];
-  ['ly-ring','ly-ring-glow','ly-warnring'].forEach(id=>{
+  ['ly-ring','ly-warnring'].forEach(id=>{
     if(gl.getLayer(id)) gl.setPaintProperty(id,'line-color',sevCol); });
   // card priority: a red flashing in-range LOW AIRCRAFT breach tops the pile, then red
   // groundings, then the amber LOW AIRCRAFT heads-up, then everything else in built order.
@@ -2119,26 +2119,23 @@ gl.on('load',()=>{
     paint:{'circle-radius':14,'circle-color':SEV_COL[2],'circle-opacity':0.4,
       'circle-stroke-color':'#ffffff','circle-stroke-width':1.5,'circle-stroke-opacity':0.9}});
   if(gl.getLayer('ly-nearair')) gl.moveLayer('ly-acalert','ly-nearair');
-  // RANGE RINGS — instrument-style concentric rings. Each is a stack: a dark CASING for
-  // legibility on any background (basemap or bright radar echo), a crisp verdict-coloured
-  // LINE, and — on the primary inner ring — a soft verdict GLOW. Round caps/joins + a hair
-  // of blur keep the circles smooth and anti-aliased. The outer bubble reads as fine dots
-  // (secondary awareness), the inner range as clean dashes (primary). Both share one source.
-  const RING_ROUND={'line-cap':'round','line-join':'round'};
-  // OPERATIONAL BUBBLE — outer 5 mi awareness ring (fine dotted)
+  // RANGE RINGS — two solid verdict-coloured circles, same thickness, each with a black
+  // outline (a wider black line under the colour → black edge inside + outside). No dots,
+  // dashes, glow or blur. Both share one source; the colour tracks the verdict.
+  const RING_JOIN={'line-join':'round'};
+  const RING_W=2.5, RING_CASE_W=4.5;
+  // OPERATIONAL BUBBLE — outer 5 mi circle
   gl.addSource('src-warnring',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
-  gl.addLayer({id:'ly-warnring-case',type:'line',source:'src-warnring',layout:RING_ROUND,
-    paint:{'line-color':'#04070a','line-width':3.4,'line-opacity':0.5,'line-blur':0.6,'line-dasharray':[0,3.4]}});
-  gl.addLayer({id:'ly-warnring',type:'line',source:'src-warnring',layout:RING_ROUND,
-    paint:{'line-color':SEV_COL[0],'line-width':1.7,'line-opacity':0.9,'line-blur':0.3,'line-dasharray':[0,3.4]}});
-  // OPERATIONAL RANGE — inner 1 mi primary ring (crisp SOLID line + soft glow), on top
+  gl.addLayer({id:'ly-warnring-case',type:'line',source:'src-warnring',layout:RING_JOIN,
+    paint:{'line-color':'#000000','line-width':RING_CASE_W}});
+  gl.addLayer({id:'ly-warnring',type:'line',source:'src-warnring',layout:RING_JOIN,
+    paint:{'line-color':SEV_COL[0],'line-width':RING_W}});
+  // OPERATIONAL RANGE — inner 1 mi circle, on top
   gl.addSource('src-ring',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
-  gl.addLayer({id:'ly-ring-glow',type:'line',source:'src-ring',layout:RING_ROUND,
-    paint:{'line-color':SEV_COL[0],'line-width':8,'line-opacity':0.16,'line-blur':5}});
-  gl.addLayer({id:'ly-ring-case',type:'line',source:'src-ring',layout:RING_ROUND,
-    paint:{'line-color':'#04070a','line-width':4.2,'line-opacity':0.6,'line-blur':0.7}});
-  gl.addLayer({id:'ly-ring',type:'line',source:'src-ring',layout:RING_ROUND,
-    paint:{'line-color':SEV_COL[0],'line-width':2,'line-opacity':1,'line-blur':0.35}});
+  gl.addLayer({id:'ly-ring-case',type:'line',source:'src-ring',layout:RING_JOIN,
+    paint:{'line-color':'#000000','line-width':RING_CASE_W}});
+  gl.addLayer({id:'ly-ring',type:'line',source:'src-ring',layout:RING_JOIN,
+    paint:{'line-color':SEV_COL[0],'line-width':RING_W}});
   updateRing();
   enforceRingZoom();   // establish the initial max-zoom cap
   // Pull location-INDEPENDENT feeds once on load (mil/sos/SPC); SKIP viewport feeds
