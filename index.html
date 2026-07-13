@@ -414,19 +414,21 @@ async function adsb(path){
   throw err||new Error('all ADS-B hosts unreachable');
 }
 // Aircraft near the MAP CENTRE — one point query SIZED TO THE VISIBLE MAP, not a
-// fixed continental sweep. A 250 nm pull is thousands of aircraft (multi-MB): too
+// fixed continental sweep. A wide pull is thousands of aircraft (multi-MB): too
 // slow to land inside the 5 s pulse (st.loading then skips pulses → visible gaps)
 // and heavy enough to invite mirror throttling. Radius = half the view diagonal
-// + margin, clamped 15–250 nm (the mirrors' cap): at the locked 10 mi view that's
-// a tiny ~sub-second query that comfortably refreshes every pulse; zooming out
-// grows it with the view. The 15 nm floor always covers the 5 mi traffic net.
-// adsb() throws if every mirror is unreachable, which the runtime treats as an
-// error (keeps the planes already on the map + retries) — never a "zero" wipe.
-const KM_TO_NM=0.539957;
+// + margin, clamped 15–100 nm: at the locked 10 mi view that's a tiny sub-second
+// query that comfortably refreshes every pulse; zooming out grows it with the
+// view up to the 100 nm cap (a deliberate ceiling well under the mirrors' 250 —
+// beyond ~100 nm the extra planes are off-mission noise at continental zooms).
+// The 15 nm floor always covers the 5 mi traffic net. adsb() throws if every
+// mirror is unreachable, which the runtime treats as an error (keeps the planes
+// already on the map + retries) — never a "zero" wipe.
+const KM_TO_NM=0.539957, ADSB_MAX_NM=100;
 function adsbRadiusNm(){
   const b=gl.getBounds();
   const diagKm=havKm(b.getSouth(),b.getWest(),b.getNorth(),b.getEast());
-  return Math.min(250,Math.max(15,Math.ceil(diagKm/2*KM_TO_NM*1.15)));
+  return Math.min(ADSB_MAX_NM,Math.max(15,Math.ceil(diagKm/2*KM_TO_NM*1.15)));
 }
 async function adsbViewport(){
   const c=gl.getCenter();
