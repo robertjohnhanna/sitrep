@@ -1434,7 +1434,7 @@ function sitrepTick(){
   const shown=items.filter(it=>it.cfg.src!=='airspace'||nearestAsp.get(aspKey(it))===it);
   shown.sort((a,z)=>a.tier-z.tier||a.km-z.km);
   const ITEM_CAP=14;
-  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,det,headOv,subOv,icOv,flash,hazardOv})=>{
+  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,km,det,headOv,subOv,icOv,flash,hazardOv})=>{
     const detTxt=det!=null?det:(cfg.detail?cfg.detail(f):'');
     const ic=icOv!=null?icOv:(typeof cfg.icon==='function'?cfg.icon(f):cfg.icon);
     const head=headOv!=null?headOv:cfg.head(f);
@@ -1447,8 +1447,9 @@ function sitrepTick(){
     // every plane card carries its ground speed on line 3 after the altitude (mph, omit if unknown)
     let l3=(inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:'');
     if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
-    cards.push(mkCard(cls, ic, head, sub, l3,
-      hazardOv!=null?hazardOv:cfg.hazard, flash?true:undefined, col));
+    const card=mkCard(cls, ic, head, sub, l3,
+      hazardOv!=null?hazardOv:cfg.hazard, flash?true:undefined, col);
+    card.km=km; cards.push(card);   // range → sorts within its category
   });
   general.forEach(c=>cards.push(c));   // solar-flare hazard etc. remain in the ranked stack
   // WEATHER is the LAST category on the SITREP. wxTail renders after EVERYTHING else (even the
@@ -1457,10 +1458,9 @@ function sitrepTick(){
   const wxTail=[...spcCards];            // WX outlook (SPC severe/tornado)
   if(!wxc.pin) wxTail.push(wxc.card);    // then general weather conditions — dead last
 
-  // -- ON-SCREEN CONTEXT: map objects OUTSIDE their ring become neutral, distance-sorted
-  //    cards in their OWN list, rendered last so they're always the bottom of the pile
-  //    (never ride up on a weather promotion). No hazard tier, no flash → never colour the title. --
-  const ctxCards=[];
+  // -- ON-SCREEN CONTEXT: map objects OUTSIDE their ring (but within the 25 mi data radius) are
+  //    neutral GENERAL objects — pushed into the SAME `cards` list so they sort by RANGE together
+  //    with the in-ring general items (aircraft / airspace interleaved by distance, not by type). --
   // "on screen" = within the fixed #3 DATA RADIUS (DATA_MI) — the same on every device,
   // so every object plotted on the map lands on the SITREP
   const screenKm=DATA_MI*MI_TO_KM;
@@ -1486,7 +1486,7 @@ function sitrepTick(){
   const CTX_CAP=24;
   ctx.filter(it=>it.cfg.src!=='airspace'||ctxAsp.get(ctxKey(it))===it)
      .sort((a,z)=>a.km-z.km).slice(0,CTX_CAP)
-     .forEach(({cfg,f,pt})=>{
+     .forEach(({cfg,f,pt,km})=>{
        const ic=typeof cfg.icon==='function'?cfg.icon(f):cfg.icon;
        const head=cfg.head(f);
        const sub=(cfg.sub?cfg.sub(f):'')||'—';
@@ -1495,7 +1495,8 @@ function sitrepTick(){
        if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
        const rawCol=cfg.src==='airspace'?f.properties._col:cfg.air?AC_COL[cfg.src]:null;
        const col=/^#[0-9a-fA-F]{3,8}$/.test(rawCol||'')?rawCol:undefined;
-       ctxCards.push(mkCard('', ic, head, sub, l3, false, undefined, col));   // neutral, no hazard/flash
+       const cc=mkCard('', ic, head, sub, l3, false, undefined, col);   // neutral general object
+       cc.km=km; cards.push(cc);   // out-of-ring → GENERAL category, range-sorted with in-ring items
      });
 
   // title severity: 0 none · 1 alert (amber) · 2 warn (red). Driven by the
@@ -1522,16 +1523,18 @@ function sitrepTick(){
   const sevCol=SEV_COL[titleSev]||SEV_COL[0];
   ['ly-ring','ly-warnring'].forEach(id=>{
     if(gl.getLayer(id)) gl.setPaintProperty(id,'line-color',sevCol); });
-  // card priority: a red flashing in-range LOW AIRCRAFT breach tops the pile, then red
-  // groundings, then the amber LOW AIRCRAFT heads-up, then everything else in built order.
-  // Stable rank sort (index tie-break) keeps distance order within each rank.
-  const rank=c=>c.flash?0                                  // red flashing low-aircraft breach
-    :(c.hazard&&c.cls==='danger')?1                        // red grounding hazard (incl. promoted wx)
-    :(c.l1==='LOW AIRCRAFT'&&c.cls==='alert')?2            // amber low-aircraft heads-up
-    :3;                                                    // everything else
-  const ordered=cards.map((c,i)=>({c,i})).sort((a,z)=>rank(a.c)-rank(z.c)||a.i-z.i).map(x=>x.c);
-  // render order: ranked cards → on-screen context → WEATHER last (WX outlook, general weather)
-  [...ordered, ...ctxCards, ...wxTail].forEach(row);
+  // CARD CATEGORIES, top → bottom: 0 flashing-red breach · 1 red warning · 2 amber alert ·
+  // 3 general objects (every non-promoted aircraft / airspace / etc within 25 mi). A card is
+  // PROMOTED out of general only by a real hazard (flash, or hazard flag + colour) — a plain
+  // amber plane (e.g. military) stays general. WITHIN each category cards sort by RANGE (km
+  // ascending); area-wide cards (data / FAA / Kp / solar / promoted weather — no km) head their
+  // category. WEATHER (wxTail) is the final category, rendered after all of the above.
+  const catOf=c=>c.flash?0:(c.hazard&&c.cls==='danger')?1:(c.hazard&&c.cls==='alert')?2:3;
+  const km=c=>c.km==null?-1:c.km;   // area-wide (no location) → head of its category
+  const ordered=cards.map((c,i)=>({c,i}))
+    .sort((a,z)=>catOf(a.c)-catOf(z.c) || km(a.c)-km(z.c) || a.i-z.i)
+    .map(x=>x.c);
+  [...ordered, ...wxTail].forEach(row);
 
   $('#sit-body').innerHTML=rows.join('');
 }
