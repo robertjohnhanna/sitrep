@@ -364,7 +364,7 @@ const gl = new maplibregl.Map({
     // raster-resampling:'nearest' → raw NEXRAD pixels, no bilinear smoothing
     layers:[{id:'carto',type:'raster',source:'carto'},
       {id:'radar',type:'raster',source:'radar',
-        paint:{'raster-opacity':0.5,'raster-resampling':'nearest'}}]
+        paint:{'raster-opacity':0.25,'raster-resampling':'nearest'}}]
   },
   center:[-96,39], zoom:3.4, minZoom:1.1, maxZoom:16,   // start over the USA until a fix lands
   renderWorldCopies:true, attributionControl:false
