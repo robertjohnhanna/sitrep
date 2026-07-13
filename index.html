@@ -421,7 +421,7 @@ function shapeIcon(color,pts,px){
 // plane silhouette, nose up
 const PLANE=[[0,-15],[-1.6,-6],[-13,3],[-13,6],[-1.6,3.5],[-1.6,11],[-5,14.5],[-5,16],[0,14],
   [5,16],[5,14.5],[1.6,11],[1.6,3.5],[13,6],[13,3],[1.6,-6]];
-// helicopter silhouette, nose up — drawn from parts (rotor bar + pod + tail boom/rotor),
+// helicopter silhouette, nose up — drawn from parts (tail boom + crossed main rotor + pod),
 // since a rotor disc can't be traced as one outline
 function heliShape(color,px){
   const {x,u,s}=iconCanvas(px);
@@ -432,9 +432,9 @@ function heliShape(color,px){
     x.strokeStyle=color; x.lineWidth=u*w;
     x.beginPath(); x.moveTo(x1*u,y1*u); x.lineTo(x2*u,y2*u); x.stroke();
   };
-  rod(0,2, 0,15, 2.2);          // tail boom (nose up → tail down)
-  rod(2,14.5, 7,14.5, 1.8);     // tail rotor
-  rod(-14,-2, 14,-2, 2.4);      // main rotor bar over the cabin
+  rod(0,2, 0,15, 2.2);            // tail boom (nose up → tail down) — no tail rotor
+  rod(-13,-11, 13,7, 2.0);        // main rotor — two crossed blades (X) centred on the hub (0,-2)
+  rod(-13,7, 13,-11, 2.0);
   x.beginPath(); x.ellipse(0,-2,4.4*u,7.2*u,0,0,Math.PI*2);   // fuselage pod (over the hub)
   x.fillStyle=color; x.fill();
   x.strokeStyle='rgba(3,8,14,.8)'; x.lineWidth=u*1.4; x.stroke();
