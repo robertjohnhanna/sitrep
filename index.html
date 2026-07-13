@@ -873,11 +873,16 @@ async function loadWeather(force){
   }catch(e){ /* keep the last-good WX */ }
   finally{ wxBusy=false; scheduleSitrep(); }
 }
+// One SITREP card is a NAMED record, not a positional tuple, so the sort/render code reads
+// fields instead of magic indices. cls: '' / 'alert' (amber) / 'danger' (red). hazard: feeds
+// the verdict colour (traffic omits it). flash: the red/white breach flash. col: an explicit
+// headline hex (airspace uses its polygon colour). Absent fields are undefined.
+const mkCard=(cls,ic,l1,l2,l3,hazard,flash,col)=>({cls,ic,l1,l2,l3,hazard,flash,col});
 // THE ONE weather card — a single feed, a single card. It changes rank/colour/text
 // with severity: a weather GATE limiting NOW promotes it to a top hazard (red grounded /
 // amber reduced-ceiling) with conditions folded onto line 3; otherwise it's the routine
 // bottom conditions card ('stale' = last-good amber, 'down' = never loaded, red+promoted).
-// Returns {pin, card}: pin floats it up with hazards. card = [cls,icon,l1,l2,l3,hazard].
+// Returns {pin, card}: pin floats it up with hazards.
 function wxCard(wxState, wn){
   const rnd=n=>n==null?null:Math.round(n);
   // compact conditions line — reused as line 3 of a promoted card so temp/sky/wind show once
@@ -888,8 +893,8 @@ function wxCard(wxState, wn){
     return (t!=null?t+'° · ':'')+d.toUpperCase()+(w!=null?' · '+wd+w+U(' mph'):'');
   };
   // feed totally down — chart can't compute; pin it so the outage is unmissable
-  if(wxState==='down') return {pin:true, card:['danger','🌡️','WEATHER UNAVAILABLE',
-    'feed down · chart can\'t compute','retrying every 5 s',true]};
+  if(wxState==='down') return {pin:true, card:mkCard('danger','🌡️','WEATHER UNAVAILABLE',
+    'feed down · chart can\'t compute','retrying every 5 s',true)};
   // The weather card's headline is driven by the chart's NOW binding reason (wn.reason),
   // so it can NEVER show a different gate than the chart cell. Only the WEATHER reasons
   // promote it; FAA / TRFC / Kp / restriction groundings are shown by their own cards, so
@@ -908,31 +913,31 @@ function wxCard(wxState, wn){
     // grounded by a weather reason → red, headline exactly matching the chart cell
     if(wn.grounded && WXHEAD[wn.reason]){
       const [ic,head,sub]=WXHEAD[wn.reason];
-      return {pin:true, card:['danger',ic,head,sub,condLine(),true]};
+      return {pin:true, card:mkCard('danger',ic,head,sub,condLine(),true)};
     }
     // reduced ceiling (not grounded) where WEATHER is the binding cap → amber
     if(!wn.grounded && (wn.reason==='WIND'||wn.reason==='SKY') && wxCap<SPEC.regFt){
       const wind=wn.reason==='WIND';
-      return {pin:true, card:['alert',wind?'💨':'☁️',(wind?'WIND':'CLOUD')+' CEILING '+wxCap+U(' ft'),
-        wind?'winds aloft over max':'low cloud base',condLine(),true]};
+      return {pin:true, card:mkCard('alert',wind?'💨':'☁️',(wind?'WIND':'CLOUD')+' CEILING '+wxCap+U(' ft'),
+        wind?'winds aloft over max':'low cloud base',condLine(),true)};
     }
     // PRECIP NEARBY: an echo within DATA_MI but not yet grounding — amber heads-up
     if(wn.precipInbound){
-      return {pin:true, card:['alert','🌧️','PRECIP NEARBY','radar echo within '+DATA_MI+U(' mi'),condLine(),true]};
+      return {pin:true, card:mkCard('alert','🌧️','PRECIP NEARBY','radar echo within '+DATA_MI+U(' mi'),condLine(),true)};
     }
   }
   // no gate — routine conditions card at the bottom (neutral / amber-if-stale)
   if(!WX) return {pin:false, card: wxState==='stale'   // no conditions loaded yet
-    ? ['alert','🌡️','WEATHER','feed unreachable','retrying every 5 s',true]
-    : ['','🌡️','WEATHER','ACQUIRING FORECAST…','',false]};
+    ? mkCard('alert','🌡️','WEATHER','feed unreachable','retrying every 5 s',true)
+    : mkCard('','🌡️','WEATHER','ACQUIRING FORECAST…','',false)};
   const [emoji,desc]=WMO[WX.code]||['🌡️','—'];
   const t=rnd(WX.tempF), f=rnd(WX.feelsF), w=rnd(WX.windMph), hi=rnd(WX.hiF), lo=rnd(WX.loF);
   const l1=(t!=null?t+'°':'—')+' · '+desc.toUpperCase();
   const wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
   const l2='WIND '+wd+(w!=null?w+U(' mph'):'—')+(f!=null?' · FEELS '+f+'°':'');
   const l3=(hi!=null?'HIGH '+hi+'°':'')+(hi!=null&&lo!=null?' · ':'')+(lo!=null?'LOW '+lo+'°':'');
-  if(wxState==='stale') return {pin:false, card:['alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE',true]};
-  return {pin:false, card:['',emoji,l1,l2,l3,false]};
+  if(wxState==='stale') return {pin:false, card:mkCard('alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE',true)};
+  return {pin:false, card:mkCard('',emoji,l1,l2,l3,false)};
 }
 /* =====================================================================
    7. LOCATION + SITREP — the "at a glance" intelligence layer
@@ -1259,15 +1264,15 @@ function sitrepTick(){
   const warnKm=GREY_MI*MI_TO_KM;
   SOS_HEX=new Set(featsIn('sos').map(f=>f.properties.hex).filter(Boolean));
   const rows=[];
-  // every row is a 3-line info card. flash: breaching aircraft → .s1 flashes red/white.
-  // col: explicit headline colour (airspace uses its polygon colour), sanitised to a bare hex.
-  const row=(cls,ic,l1,l2,l3,flash,col)=>rows.push(
-    `<div class="sit-row${cls?' '+cls:''}${flash?' acflash':''}"><span class="ic">${ic}</span>`+
-    `<span class="tx"><span class="s1"${col?` style="color:${col}"`:''}>${l1||''}</span><span class="s2">${l2||''}</span><span class="s3">${l3||''}</span></span></div>`);
+  // render one card record → a 3-line info row. flash: breaching aircraft → .s1 flashes
+  // red/white. col: explicit headline hex (airspace polygon colour), sanitised upstream.
+  const row=c=>rows.push(
+    `<div class="sit-row${c.cls?' '+c.cls:''}${c.flash?' acflash':''}"><span class="ic">${c.ic}</span>`+
+    `<span class="tx"><span class="s1"${c.col?` style="color:${c.col}"`:''}>${c.l1||''}</span><span class="s2">${c.l2||''}</span><span class="s3">${c.l3||''}</span></span></div>`);
   // Distance + direction are measured from the map centre (your location).
   const dirMi=(la,lo)=>compass(bearing(lat,lon,la,lo))+' '+fmtMi(havKm(lat,lon,la,lo));
 
-  const cards=[];   // [cls, icon, l1, l2, l3, hazard, flash, col]
+  const cards=[];   // array of mkCard() records
 
   // -- LOW AIRCRAFT (two-tier): a plane (civil / military / emergency) under the
   //    WARN_AGL_FT (400 ft ceiling + FAA_SEP_FT) warning altitude. Where it is
@@ -1310,10 +1315,10 @@ function sitrepTick(){
   const faaCap=(FLY.detail&&!FLY.detail.aspUnknown)?FLY.detail.aspCapFt:null;
   if(faaCap!=null && faaCap<SPEC.regFt){
     const rangeTxt='within '+RNG.mi.toFixed(1)+U(' mi');
-    if(faaCap<0) cards.push(['danger','⛔','FAA NO-FLY','LAANC grid · 0 ft ceiling',
-      rangeTxt,true]);
-    else cards.push(['alert','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',
-      rangeTxt,true]);
+    if(faaCap<0) cards.push(mkCard('danger','⛔','FAA NO-FLY','LAANC grid · 0 ft ceiling',
+      rangeTxt,true));
+    else cards.push(mkCard('alert','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',
+      rangeTxt,true));
   }
 
   // the weather card (below) folds every weather gate into itself — one feed, one card
@@ -1324,11 +1329,11 @@ function sitrepTick(){
   //    KP gate uses, so they can't disagree. Quiet/unknown → no card. --
   const kpNow=FLY.detail?FLY.detail.kpNow:null;
   if(kpNow!=null && kpNow>=SPEC.kpGnd){
-    cards.push(['danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
-      'GPS / compass unreliable',true]);
+    cards.push(mkCard('danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      'GPS / compass unreliable',true));
   }else if(kpNow!=null && kpNow>=SPEC.kpCaut){
-    cards.push(['alert','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
-      'GPS accuracy may be reduced',true]);
+    cards.push(mkCard('alert','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      'GPS accuracy may be reduced',true));
   }
 
   // -- DATA HEALTH (pinned): a feed shows here until it has PULLED + PRINTED. Two tiers:
@@ -1364,8 +1369,8 @@ function sitrepTick(){
     // hazard flag colours the verdict — true for a real gate problem, FALSE when the only
     // thing pending is aircraft (traffic is informational; planes still loading ≠ caution)
     const dataHazard=dataFeeds.some(f=>f!=='aircraft');
-    cards.push([red?'danger':'alert','📡', red?'DATA NOT LOADED':'DATA UNVERIFIED',
-      cut(dataFeeds.join(' · '),30), red?'acquiring — verify before flying':'retrying every 5 s', dataHazard]);
+    cards.push(mkCard(red?'danger':'alert','📡', red?'DATA NOT LOADED':'DATA UNVERIFIED',
+      cut(dataFeeds.join(' · '),30), red?'acquiring — verify before flying':'retrying every 5 s', dataHazard));
   }
   // weather-feed health: down = never loaded (red), stale = last-good shows (amber)
   const wxState=wxStale?(FLY.data?'stale':'down'):'ok';
@@ -1384,15 +1389,15 @@ function sitrepTick(){
       .sort((a,b)=>(parseFloat(b.properties.code)||0)-(parseFloat(a.properties.code)||0))[0];
     const catHit=spcF.filter(f=>f.properties.kind==='cat'&&f.properties.rank>=1&&pointInFeature(f,lon,lat))
       .sort((a,b)=>b.properties.rank-a.properties.rank)[0];
-    if(tornHit) spcCards.push(['','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
-      tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',false]);
-    if(catHit) spcCards.push(['','⛈️','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
-      'tornado / hail / wind risk',false]);
+    if(tornHit) spcCards.push(mkCard('','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
+      tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',false));
+    if(catHit) spcCards.push(mkCard('','⛈️','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
+      'tornado / hail / wind risk',false));
   }
   // solar flare: an M/X GOES X-ray flare risks an HF radio blackout — a context card,
   // not a chart gate (the Kp storm above is the one that grounds)
-  if(XRAY&&/^[MX]/.test(XRAY)) general.push([/^X/.test(XRAY)?'danger':'alert','☀️','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
-    'HF radio blackout risk',true]);
+  if(XRAY&&/^[MX]/.test(XRAY)) general.push(mkCard(/^X/.test(XRAY)?'danger':'alert','☀️','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
+    'HF radio blackout risk',true));
 
   // -- INDIVIDUAL item cards: one per in-view feature, interleaved. Hazards outrank
   //    routine traffic; tiers red → amber → rest, distance sorts within each. Capped. --
@@ -1448,8 +1453,8 @@ function sitrepTick(){
     // every plane card carries its ground speed on line 3 after the altitude (mph, omit if unknown)
     let l3=(inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:'');
     if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
-    cards.push([cls, ic, head, sub, l3,
-      hazardOv!=null?hazardOv:cfg.hazard, flash?true:undefined, col]);
+    cards.push(mkCard(cls, ic, head, sub, l3,
+      hazardOv!=null?hazardOv:cfg.hazard, flash?true:undefined, col));
   });
   general.forEach(c=>cards.push(c));   // area-wide context cards sink to the bottom
   spcCards.forEach(c=>cards.push(c));  // SPC outlook (info) sits just above weather
@@ -1493,7 +1498,7 @@ function sitrepTick(){
        if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
        const rawCol=cfg.src==='airspace'?f.properties._col:cfg.air?AC_COL[cfg.src]:null;
        const col=/^#[0-9a-fA-F]{3,8}$/.test(rawCol||'')?rawCol:undefined;
-       ctxCards.push(['', ic, head, sub, l3, false, undefined, col]);   // neutral, no hazard/flash
+       ctxCards.push(mkCard('', ic, head, sub, l3, false, undefined, col));   // neutral, no hazard/flash
      });
 
   // title severity: 0 none · 1 alert (amber) · 2 warn (red). Driven by the
@@ -1509,7 +1514,7 @@ function sitrepTick(){
   // before the first chart render; a post-load transient blip is amber caution (fail-open)
   if(flyNeverVerified()) titleSev=2;
   else if(FLY.detail&&flyUnknown().length) titleSev=Math.max(titleSev,1);
-  cards.forEach(cd=>{ if(cd[5]) titleSev=Math.max(titleSev,cd[0]==='danger'?2:cd[0]==='alert'?1:0); });
+  cards.forEach(c=>{ if(c.hazard) titleSev=Math.max(titleSev,c.cls==='danger'?2:c.cls==='alert'?1:0); });
   // stamp the verdict on the hidden #sit-title (tests/parity); the visible verdict is the ring colour
   { const t=$('#sit-title'); if(t){
     t.classList.remove('warn','alert');
@@ -1523,13 +1528,13 @@ function sitrepTick(){
   // card priority: a red flashing in-range LOW AIRCRAFT breach tops the pile, then red
   // groundings, then the amber LOW AIRCRAFT heads-up, then everything else in built order.
   // Stable rank sort (index tie-break) keeps distance order within each rank.
-  const rank=cd=>cd[6]?0                                   // red flashing low-aircraft breach
-    :(cd[5]&&cd[0]==='danger')?1                           // red grounding hazard
-    :(cd[2]==='LOW AIRCRAFT'&&cd[0]==='alert')?2           // amber low-aircraft heads-up
+  const rank=c=>c.flash?0                                  // red flashing low-aircraft breach
+    :(c.hazard&&c.cls==='danger')?1                        // red grounding hazard
+    :(c.l1==='LOW AIRCRAFT'&&c.cls==='alert')?2            // amber low-aircraft heads-up
     :3;                                                    // everything else
-  const ordered=cards.map((cd,i)=>({cd,i})).sort((a,z)=>rank(a.cd)-rank(z.cd)||a.i-z.i).map(x=>x.cd);
+  const ordered=cards.map((c,i)=>({c,i})).sort((a,z)=>rank(a.c)-rank(z.c)||a.i-z.i).map(x=>x.c);
   // context cards ALWAYS render last (a promoted card can rise, but context stays bottom)
-  [...ordered, ...ctxCards].forEach(cd=>row(cd[0],cd[1],cd[2],cd[3],cd[4],cd[6],cd[7]));
+  [...ordered, ...ctxCards].forEach(row);
 
   $('#sit-body').innerHTML=rows.join('');
 }
