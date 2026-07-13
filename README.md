@@ -196,7 +196,7 @@ gate input.
 
 | Layer | Source | Refresh |
 |---|---|---|
-| Aircraft (250 nm around centre, civil) — loads around YOU (the heavy query skips the pre-fix default centre, so the first pull isn't a wasted sweep of the US interior) | airplanes.live → adsb.fi fallback | on move · 5 s |
+| Aircraft (civil) — the point query is **sized to the visible map** (half the view diagonal, clamped 15–250 nm): a tiny sub-second pull at the locked 10 mi view that lands inside every 5 s pulse, growing as you zoom out. Loads around YOU (skips the pre-fix default centre) | airplanes.live → adsb.fi fallback | on move · 5 s |
 | Military aircraft (worldwide) | ADS-B `/mil` | 5 s |
 | Emergency squawks (worldwide) | ADS-B `/squawk` | 5 s |
 | NWS warning polygons (US) — red outline for Extreme/Severe, amber otherwise | api.weather.gov | 15 s |

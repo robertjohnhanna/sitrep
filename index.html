@@ -413,15 +413,24 @@ async function adsb(path){
   }
   throw err||new Error('all ADS-B hosts unreachable');
 }
-// Aircraft near the MAP CENTRE — one single 250-nm point query, nothing fancy.
-// The readsb mirrors cap point queries at 250 nm; that one circle around the
-// centre is plenty and dead reliable. Refetched on every map move and every
-// refresh pulse. adsb() throws if every mirror is unreachable, which the runtime
-// treats as an error (keeps the planes already on the map + retries) rather
-// than a "zero aircraft" wipe.
+// Aircraft near the MAP CENTRE — one point query SIZED TO THE VISIBLE MAP, not a
+// fixed continental sweep. A 250 nm pull is thousands of aircraft (multi-MB): too
+// slow to land inside the 5 s pulse (st.loading then skips pulses → visible gaps)
+// and heavy enough to invite mirror throttling. Radius = half the view diagonal
+// + margin, clamped 15–250 nm (the mirrors' cap): at the locked 10 mi view that's
+// a tiny ~sub-second query that comfortably refreshes every pulse; zooming out
+// grows it with the view. The 15 nm floor always covers the 5 mi traffic net.
+// adsb() throws if every mirror is unreachable, which the runtime treats as an
+// error (keeps the planes already on the map + retries) — never a "zero" wipe.
+const KM_TO_NM=0.539957;
+function adsbRadiusNm(){
+  const b=gl.getBounds();
+  const diagKm=havKm(b.getSouth(),b.getWest(),b.getNorth(),b.getEast());
+  return Math.min(250,Math.max(15,Math.ceil(diagKm/2*KM_TO_NM*1.15)));
+}
 async function adsbViewport(){
   const c=gl.getCenter();
-  const j=await adsb('/point/'+c.lat.toFixed(3)+'/'+c.lng.toFixed(3)+'/250');
+  const j=await adsb('/point/'+c.lat.toFixed(3)+'/'+c.lng.toFixed(3)+'/'+adsbRadiusNm());
   return {ac:j.ac||[]};
 }
 // Is this ADS-B contact a rotorcraft? The emitter CATEGORY 'A7' is the ICAO
@@ -758,7 +767,7 @@ const USER={lat:null,lon:null,src:null,tz:''};
 
 /* ---------------- Movement ---------------- */
 defLayer({
-  id:'nearair', label:'Aircraft (250 nm)', color:AC_COL.nearair, refresh:REFRESH_S,
+  id:'nearair', label:'Aircraft (view)', color:AC_COL.nearair, refresh:REFRESH_S,
   viewport:true,   // data is scoped to the map area → refetch on every view change
   icon:acIconExpr('near'), rotate:true, iconSize:0.6,
   // every civil (non-military) aircraft in the current map area; refetched on
