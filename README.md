@@ -123,8 +123,8 @@ context cards):
 - 📡 **DATA** — the flyability gates fail *open*, so an unverifiable feed keeps
   its last-good value and only ambers the NOW header quietly. If **FAA airspace,
   Kp, or radar** stays stale past a ~35 s grace window (a self-healing blip won't
-  pop it), this amber card names them. Tap to force a refresh; it clears the
-  moment every feed is fresh. (Weather health rides the weather card itself — see
+  pop it), this amber card names them. It auto-retries on the 5 s pulse and clears
+  the moment every feed is fresh. (Weather health rides the weather card itself — see
   below — so there's never a duplicate card for the same feed.)
 - 🌡️ **WEATHER** — there's one weather feed, so there's **one weather card**, and
   it changes rank, colour and text with its own severity (no separate transient
@@ -184,13 +184,14 @@ context cards):
   colour and no title contribution (an outlook is "expected", not a warning) —
   sitting just above the 🌡️ local forecast (always present).
 
-Every card carries a distance + bearing to its item (airspace/TFR zones by the
-polygon's nearest edge — the same edge distance used for sorting and range
-inclusion). The map stays locked on you and never moves, so on mobile a card tap
-just drops back to the map, where the item already sits inside the fixed 10-mile
-view. The **SITREP title** is the one-glance verdict: red when the NOW column is
-grounded or a red hazard is in range, amber for a reduced ceiling, an amber hazard,
-or any unverified gate input.
+**Cards are info-only** — no tap actions, no chevron. Each carries a distance +
+bearing to its item (airspace/TFR zones by the polygon's nearest edge — the same
+edge distance used for sorting and range inclusion). On mobile the card list
+**scrolls**, and a **tap anywhere** — a card, the chart, empty space — drops back
+to the map, where the item already sits inside the fixed 10-mile view. The **SITREP
+title** is the one-glance verdict: red when the NOW column is grounded or a red
+hazard is in range, amber for a reduced ceiling, an amber hazard, or any unverified
+gate input.
 
 ## Map layers
 
@@ -234,11 +235,11 @@ every 5 s** — no manual refresh control.
 
 **Mobile portrait** (iPhone, and any ≤1000px-wide portrait screen) is a **two-page
 toggle**: the map and the panel are separate full-screen pages. **Tap the map** to
-bring the panel up; **tap anywhere on the panel** — the chart, any empty space — to
-drop back to the map. The only exception is a **SITREP card**, which reveals the map
-(the item already sits inside the fixed 10-mile view) or opens a source page. No drag,
-no snap points — one tap flips the page, and each gets the whole screen (the panel uses
-the dynamic viewport height so it never spills below Safari's address bar).
+bring the panel up; **tap anywhere on the panel** — a card, the chart, any empty
+space — to drop back to the map. Cards are info-only, so nothing is exempt; only
+**scrolling** the card list (a non-tap gesture) stays on the panel. No drag, no snap
+points — one tap flips the page, and each gets the whole screen (the panel uses the
+dynamic viewport height so it never spills below Safari's address bar).
 
 ## Location & privacy
 

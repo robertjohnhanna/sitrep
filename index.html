@@ -168,9 +168,9 @@
     #map-title.acflash,.sit-row.acflash .s1,#fly-pane .gc.acflash{animation:none}}
   #sit-body{display:flex;flex-direction:column;align-content:start;
     overflow-y:auto;padding:4px 0;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0}
-  /* every SITREP row is a uniform 3-line block: icon · three text lines · an
-     action chevron. Lines CLIP (no "…") — content is written concise enough to
-     fit the width. */
+  /* every SITREP row is a uniform 3-line info block: icon · three text lines.
+     Cards are INFO-ONLY — not tappable, no chevron. Lines CLIP (no "…") —
+     content is written concise enough to fit the width. */
   .sit-row{display:flex;align-items:center;gap:9px;padding:8px 12px;font-size:13px;min-height:62px;
     border-bottom:1px solid #10171f}
   /* card icon: clearly visible but not oversized, vertically centred next to the
@@ -182,13 +182,6 @@
     overflow:hidden;text-overflow:clip}
   .sit-row .tx .s1{color:var(--ink)}
   .sit-row .tx .s2,.sit-row .tx .s3{color:var(--ink-dim);font-size:12px}
-  /* the whole card is the click target — no button. A chevron hints tappability. */
-  .sit-row.clickable{cursor:pointer}
-  .sit-row.clickable::after{content:"›";flex:0 0 auto;align-self:center;color:var(--ink-dim);
-    font-size:20px;line-height:1;padding-left:2px}
-  @media(hover:hover){.sit-row.clickable:hover{background:var(--panel2)}}
-  .sit-row.clickable:active{background:var(--panel2)}
-  .sit-row.clickable:hover::after,.sit-row.clickable:active::after{color:var(--accent)}
   .sit-row.alert .s1{color:var(--warn)}
   .sit-row.danger .s1{color:var(--danger)}
   .sit-empty{padding:14px 12px;font-size:13px;color:var(--ink-dim);line-height:1.5}
@@ -1099,7 +1092,6 @@ function pulse(force){
   flyRefresh(); loadWeather(force); refreshRadar();
   refreshBase=Date.now();   // restart the auto-refresh countdown from zero
 }
-function forceRefresh(){ pulse(true); }   // the DATA card taps this to force a full refresh
 function refreshTick(){ if(Date.now()-refreshBase>=REFRESH_S*1000) pulse(); }
 
 // No layer selector: every layer's map source + style is created here and stays
@@ -1173,7 +1165,7 @@ async function loadWeather(force){
 // the usual [cls, icon, l1, l2, l3, action, hazard] tuple. wn = FLY.detail.wxNow.
 function wxCard(wxState, wn){
   const rnd=n=>n==null?null:Math.round(n);
-  const retry='data-act="refresh"';
+  const retry='';   // cards are info-only; feeds auto-retry on the 5 s pulse
   // compact current-conditions line — reused as line 3 of a promoted gate card so
   // the temperature / sky / wind still appear exactly once (no separate card)
   const condLine=()=>{
@@ -1184,7 +1176,7 @@ function wxCard(wxState, wn){
   };
   // feed totally down — chart can't compute; pin it so the outage is unmissable
   if(wxState==='down') return {pin:true, card:['danger','🌡️','WEATHER UNAVAILABLE',
-    'feed down · chart can\'t compute','tap to retry',retry,true]};
+    'feed down · chart can\'t compute','retrying every 5 s',retry,true]};
   // an active weather GATE promotes the card to a top hazard (grounded red / capped
   // amber); conditions ride line 3, so the sky/temp aren't repeated elsewhere
   if(wn){
@@ -1212,7 +1204,7 @@ function wxCard(wxState, wn){
   }
   // no gate — routine conditions card at the bottom (neutral / amber-if-stale)
   if(!WX) return {pin:false, card: wxState==='stale'   // no conditions loaded yet
-    ? ['alert','🌡️','WEATHER','feed unreachable','tap to retry',retry,true]
+    ? ['alert','🌡️','WEATHER','feed unreachable','retrying every 5 s',retry,true]
     : ['','🌡️','WEATHER','ACQUIRING FORECAST…','','',false]};
   const [emoji,desc]=WMO[WX.code]||['🌡️','—'];
   const t=rnd(WX.tempF), f=rnd(WX.feelsF), w=rnd(WX.windMph), hi=rnd(WX.hiF), lo=rnd(WX.loF);
@@ -1220,7 +1212,7 @@ function wxCard(wxState, wn){
   const wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
   const l2='WIND '+wd+(w!=null?w+U(' mph'):'—')+(f!=null?' · FEELS '+f+'°':'');
   const l3=(hi!=null?'HIGH '+hi+'°':'')+(hi!=null&&lo!=null?' · ':'')+(lo!=null?'LOW '+lo+'°':'');
-  if(wxState==='stale') return {pin:false, card:['alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE — TAP',retry,true]};
+  if(wxState==='stale') return {pin:false, card:['alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE',retry,true]};
   return {pin:false, card:['',emoji,l1,l2,l3,'',false]};
 }
 /* =====================================================================
@@ -1626,19 +1618,18 @@ function sitrepTick(){
   const warnKm=GREY_MI*MI_TO_KM;
   SOS_HEX=new Set(featsIn('sos').map(f=>f.properties.hex).filter(Boolean));
   const rows=[];
-  // Every row is 3 lines (l1/l2/l3). The WHOLE card is the click target — the
-  // action (fly-to / open) rides as data-* on the row, so tapping anywhere on a
-  // plane card flies to the plane, an outlook card opens SPC, etc. A row with no
-  // valid action gets no data-* and isn't clickable.
+  // Every row is a 3-line (l1/l2/l3) INFO card — not tappable, no action. The old
+  // per-card action slot is retained in the card tuples (cd[5]) for shape stability
+  // but is ignored here; the helpers below return '' so nothing actionable is built.
   // flash: extra-alert headline (a breaching aircraft) → the .s1 flashes red/white
   // col: an explicit headline colour (airspace cards use their polygon colour) —
   // an inline style so it wins over the cls (alert/danger) colour; sanitised to a
   // bare hex so it can't break out of the attribute.
   const row=(cls,ic,l1,l2,l3,act,flash,col)=>rows.push(
-    `<div class="sit-row${cls?' '+cls:''}${flash?' acflash':''}${act?' clickable':''}"${act?' '+act:''}><span class="ic">${ic}</span>`+
+    `<div class="sit-row${cls?' '+cls:''}${flash?' acflash':''}"><span class="ic">${ic}</span>`+
     `<span class="tx"><span class="s1"${col?` style="color:${col}"`:''}>${l1||''}</span><span class="s2">${l2||''}</span><span class="s3">${l3||''}</span></span></div>`);
-  const llBtn=(lo,la)=>isFinite(lo)&&isFinite(la)?`data-act="fly" data-ll="${lo+','+la}"`:'';
-  const openBtn=url=>`data-act="open" data-url="${escapeHtml(url)}"`;
+  const llBtn=()=>'';   // cards are info-only — no fly-to action
+  const openBtn=()=>'';  // cards are info-only — no source-link action
   // Distance + direction are measured from the CROSSHAIR (map centre) — the
   // location chip already reverse-geocodes it, so the whole panel describes the
   // point you're looking at. It sits on you by default and after the ME button.
@@ -1724,14 +1715,14 @@ function sitrepTick(){
   //    surfaces that explicitly (and touch-accessibly, unlike the hover tooltip)
   //    once a feed has been stale past the grace window. WEATHER is excluded here
   //    — its health rides the weather card itself (no duplicate card for the same
-  //    feed) — so this covers FAA airspace / Kp / radar only. Amber; tap to force
-  //    a refresh; clears the moment every feed is fresh. --
+  //    feed) — so this covers FAA airspace / Kp / radar only. Amber; auto-retries
+  //    on the pulse; clears the moment every feed is fresh. --
   const unstable=flyUnknownStable();
   const wxStale=unstable.includes('weather');
   const dataBad=unstable.filter(x=>x!=='weather');
   if(dataBad.length){
     cards.push(['alert','📡','DATA UNVERIFIED',cut(dataBad.join(' · '),30),
-      'tap to retry','data-act="refresh"',true]);
+      'retrying every 5 s','',true]);
   }
   // weather-feed health for the weather card: down = never loaded (red, chart
   // blind), stale = failing but last-good conditions still show (amber)
@@ -1902,17 +1893,8 @@ function sitrepTick(){
   $('#sit-body').innerHTML=rows.join('');
 }
 
-// action handler for a clicked SITREP card. The map is locked on you and never
-// moves, so a card doesn't fly the camera — it just reveals the map (mobile), where
-// the item already sits inside the fixed 10 mi view; or opens a source page.
-function handleAct(btn){
-  const act=btn.dataset.act;
-  if(act==='fly'){
-    if(MQ_MOBILE.matches&&window.panelClose) window.panelClose();   // drop back to the map to see it
-  } else if(act==='open'&&btn.dataset.url){ window.open(btn.dataset.url,'_blank','noopener'); }
-  else if(act==='refresh'){ forceRefresh(); }   // DATA card → force a full refresh
-}
-$('#sit-body').addEventListener('click',e=>{ const b=e.target.closest('[data-act]'); if(b) handleAct(b); });
+// SITREP cards are info-only — no click actions. On mobile a tap anywhere on the
+// panel (cards included) drops back to the map; see panelToggle.
 // Viewport-scoped feeds refetch for the new area whenever the visible bounds
 // change — on every map move AND on every container resize. A resize (window,
 // panel, orientation, sheet) enlarges the view without a pan, so without this
@@ -1960,24 +1942,23 @@ gl.on('moveend',refreshViewport);
 gl.on('resize',refreshViewport);
 
 // ---- MOBILE TWO-PAGE TOGGLE — the map and the CANIFLY panel are two full-screen
-//      pages. Tap the map to bring the panel up; tap ANYWHERE on the panel to drop
-//      back to the map — only a SITREP card is exempt (it runs its own fly-to/open
-//      action). No drag, no peek, no snap points — one tap flips the page. Desktop
-//      keeps the docked-right panel (guarded by MQ). --
+//      pages. Tap the map to bring the panel up; tap ANYWHERE on the panel — the
+//      chart, a card, any empty space — to drop back to the map. Cards are info-only,
+//      so nothing is exempt; only SCROLLING the card list is a non-tap gesture (a
+//      scroll fires no click, so it never flips the page). No drag, no peek, no snap
+//      points — one tap flips the page. Desktop keeps the docked-right panel (MQ). --
 (function panelToggle(){
   const body=document.body;
   const open =()=>{ if(MQ_MOBILE.matches) body.classList.add('panel-open'); };
   const close=()=>body.classList.remove('panel-open');
-  window.panelClose=close;   // used by handleAct (fly-to → show the map)
+  window.panelClose=close;
   // a genuine tap on the map canvas (MapLibre fires 'click' only on a tap, never
   // a drag/pinch) brings the panel up; steppers/buttons are separate DOM overlays
   gl.on('click',open);
-  // one big "back to the map" target: the whole panel (the chart, any empty space)
-  // closes on tap; only a tap on a card is exempt, falling through to its own fly-to /
-  // open action.
+  // one big "back to the map" target: a tap ANYWHERE on the panel (chart, cards, empty
+  // space) closes it. Scrolling the card list fires no click, so it doesn't flip back.
   $('#sitrep').addEventListener('click',e=>{
     if(!MQ_MOBILE.matches) return;                    // desktop: docked panel, no toggle
-    if(e.target.closest('.sit-row')) return;
     close();
   });
   // rotating to a desktop width clears the toggle so the docked panel shows
