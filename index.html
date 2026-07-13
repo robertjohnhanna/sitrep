@@ -276,12 +276,15 @@ function acFeatures(j,kind){
 }
 // features last loaded for a layer id (from our own LAYER_STATE, not MapLibre internals)
 function featsIn(id){const st=LAYER_STATE[id];return (st&&st.features)||[];}
-// visible map bounds as an ArcGIS envelope (west,south,east,north) + edge margin —
-// scopes the airspace/NPS overlays to the view (refetched on recenter, see refreshViewport)
+// ArcGIS envelope (west,south,east,north) for the airspace/NPS pulls — a fixed
+// DATA_MI (#3) box centred on YOU, so airspace covers the same 25 mi as the aircraft
+// pull, identical on every device. Pre-fix falls back to the map centre. Refetched on
+// recenter (see refreshViewport). A box circumscribes the 25 mi circle; the SITREP then
+// cards zones within the 25 mi radius, exactly like aircraft.
 function viewEnv(){
-  const b=gl.getBounds(), m=0.05;   // ~5 km lat margin
-  return [b.getWest()-m,b.getSouth()-m,b.getEast()+m,b.getNorth()+m]
-    .map(n=>n.toFixed(3)).join(',');
+  const c = USER.lat!=null ? {lat:USER.lat,lng:USER.lon} : gl.getCenter();
+  const {dLat,dLon}=geoDeltas(DATA_MI*MI_TO_KM,c.lat);
+  return [c.lng-dLon,c.lat-dLat,c.lng+dLon,c.lat+dLat].map(n=>n.toFixed(3)).join(',');
 }
 // polygon feature -> a representative [lon,lat] (first vertex)
 function polyPt(f){
