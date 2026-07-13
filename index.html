@@ -2158,7 +2158,7 @@ gl.on('load',()=>{
   // outline (a wider black line under the colour → black edge inside + outside). No dots,
   // dashes, glow or blur. Both share one source; the colour tracks the verdict.
   const RING_JOIN={'line-join':'round'};
-  const RING_W=2.5, RING_CASE_W=4.5;
+  const RING_W=1.25, RING_CASE_W=2.25;
   // OPERATIONAL BUBBLE — outer 5 mi circle
   gl.addSource('src-warnring',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   gl.addLayer({id:'ly-warnring-case',type:'line',source:'src-warnring',layout:RING_JOIN,
