@@ -30,11 +30,15 @@
     --safe-top:env(safe-area-inset-top,0px);
     --safe-bottom:env(safe-area-inset-bottom,0px);
   }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  /* read-only display: no text selection, callout, tap highlight, or double-tap zoom */
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   /* height:100% (not dvh — iOS Safari's floating URL bar makes dvh resolve short) */
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
     font-family:var(--mono);font-size:13px;overflow:hidden;
     overscroll-behavior:none;touch-action:manipulation;text-transform:uppercase}
+  /* the SITREP still scrolls, but double-tap / pinch zoom is disabled everywhere */
+  #sit-body{touch-action:pan-y}
   button{font-family:var(--mono);cursor:pointer}
   a{color:var(--go)}
   ::-webkit-scrollbar{width:8px;height:8px}
@@ -73,8 +77,10 @@
     padding-bottom:5px;font-weight:500;font-size:12px;color:var(--ink)}
   #fly-pane .ghead .gc{border-left:0}
   #fly-pane .ghead .gc.now{font-weight:700}
-  /* NOW header turns yellow when a gate input is unknown (unverified ≠ clear) */
-  #fly-pane .ghead .gc.unk{color:var(--caution)}
+  /* the NOW header follows the overall verdict colour, exactly like the clock */
+  #fly-pane .ghead .gc.now.go{color:var(--go)}
+  #fly-pane .ghead .gc.now.caution{color:var(--caution)}
+  #fly-pane .ghead .gc.now.nogo{color:var(--nogo)}
   #fly-pane .ga.hi{font-weight:700}
   #fly-pane .ggust .ga,#fly-pane .ggust .gc{border-top:1px solid rgba(116,133,150,.4)}
   /* a cap/gate code cell (GUST/VIS/SKY/WIND/FAA/TRFC/PCPN/KPx) */
@@ -951,8 +957,9 @@ function sitrepTick(){
   // aircraft are tracked further out (the 5 mi GREY bubble) so you see traffic approaching:
   // low in the grey bubble → yellow heads-up; low inside the 1 mi red ring → red warning.
   const warnKm=GREY_MI*MI_TO_KM;
-  // no GPS fix yet → only the permanent LOCATION card (acquiring, or a denial notice)
+  // no GPS fix yet → can't fly (no location): red verdict + only the LOCATION card
   if(USER.lat==null){
+    verdictSeverity=2; renderClock();
     $('#sit-body').innerHTML='<div class="sit-empty">'+
       (geolocationDenied?'LOCATION REQUIRED — ENABLE GPS AND RELOAD':'ACQUIRING GPS…')+'</div>';
     return;
@@ -1605,17 +1612,11 @@ function flyComputeDetail(){
     return 'good';
   };
   const nowMaxFly=grid.length?grid[0].maxFly:-1;
-  // NOW-column advisories yellow the header (grounded red wins): unverified inputs plus a
-  // G1–G2 Kp caution (Kp 5–6) — degraded GPS you can fly with, cautiously
-  const unk=flyUnknown();
-  const kpNowV=kpAt(0);
-  const kpCautNow=kpNowV!=null&&kpNowV>=SPEC.kpCaut&&kpNowV<SPEC.kpGnd;
-  const nowAdv=[...unk]; if(kpCautNow) nowAdv.push('Kp '+Math.round(kpNowV)+' storm');
-  // NOW header: red 'bad' if grounded OR a required feed has never verified (not ready);
-  // yellow 'unk' for a post-load advisory/blip. The SITREP cards spell out which feed.
-  const nowRed=flyNeverVerified();
+  // Column headers. A FUTURE column that's grounded shows red. The NOW header is left
+  // uncoloured here and painted with the OVERALL verdict colour by renderClock() (so it
+  // matches the clock) — the verdict is a superset of the chart's own NOW state.
   const colLabels=grid.map(g=>({v:g.n===0?'now':'+'+g.n+'h',
-    st:(g.grounded||(g.n===0&&nowRed))?'bad':(g.n===0&&nowAdv.length?'unk':''), now:g.n===0}));
+    st:(g.n>0&&g.grounded)?'bad':'', now:g.n===0}));
   const topFt=ALTS[0];
   const altRows=ALTS.map(ft=>{
     const cells=grid.map(g=>{
@@ -1769,17 +1770,18 @@ function flyOnMove(){
    ===================================================================== */
 const VERDICT_CLASS=['go','caution','nogo'];   // CSS class per severity 0/1/2
 let verdictSeverity=0;
-// current local time (device timezone), e.g. "3:07 PM"
+// current local time (device timezone), 24-hour, no AM/PM — e.g. "15:07"
 function clockText(){
-  try{ return new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }
+  try{ return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false}); }
   catch(e){ return ''; }
 }
-// paint the chart's top-left clock cell: current time, tinted by the verdict
+// paint the verdict colour onto BOTH the top-left clock and the NOW header cell — the two
+// glance points for "can I fly right now?" — plus the live time on the clock.
 function renderClock(){
-  const cell=document.querySelector('#fly-board .ga.clock');
-  if(!cell) return;
-  cell.textContent=clockText();
-  cell.className='ga clock '+VERDICT_CLASS[verdictSeverity];
+  const clock=document.querySelector('#fly-board .ga.clock');
+  if(clock){ clock.textContent=clockText(); clock.className='ga clock '+VERDICT_CLASS[verdictSeverity]; }
+  const now=document.querySelector('#fly-board .ghead .gc.now');
+  if(now) now.className='gc now '+VERDICT_CLASS[verdictSeverity];
 }
 
 /* =====================================================================
@@ -1788,6 +1790,12 @@ function renderClock(){
    first GPS fix (see setUserFix); until then the SITREP shows the LOCATION card.
    ===================================================================== */
 function boot(){
+  // read-only display: block double-click / double-tap zoom, iOS pinch-zoom gestures, and
+  // the browser context menu, so a stray tap can never zoom or select the interface.
+  document.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});
+  document.addEventListener('contextmenu',e=>e.preventDefault());
+  ['gesturestart','gesturechange','gestureend'].forEach(ev=>
+    document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
   initLayers();
   // location-INDEPENDENT feeds load now (military aircraft, NWS warnings, SPC outlook);
   // position-scoped feeds wait for the first fix, which kicks them via setUserFix().
