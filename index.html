@@ -928,9 +928,9 @@ function wxCard(wxState, wn){
       return {pin:true, card:mkCard('alert',wind?'💨':'☁️',(wind?'WIND':'CLOUD')+' CEILING '+wxCap+U(' ft'),
         wind?'winds aloft over max':'low cloud base',condLine(),true)};
     }
-    // PRECIP NEARBY: an echo within DATA_MI but not yet grounding — amber heads-up
+    // PRECIPITATION NEARBY: an echo within DATA_MI but not yet grounding — amber heads-up
     if(wn.precipInbound){
-      return {pin:true, card:mkCard('alert','🌧️','PRECIP NEARBY','radar echo within '+DATA_MI+U(' mi'),condLine(),true)};
+      return {pin:true, card:mkCard('alert','🌧️','PRECIPITATION NEARBY','radar echo within '+DATA_MI+U(' mi'),condLine(),true)};
     }
   }
   // no gate — routine conditions card at the bottom (neutral / amber-if-stale)
