@@ -1,0 +1,1856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="canifly">
+<meta name="description" content="canifly — keyless drone preflight: can I fly here, now, and how high? GPS-located: live weather, winds aloft, FAA airspace, radar and traffic.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%A9%3C/text%3E%3C/svg%3E">
+<title>canifly</title>
+
+<!-- canifly — self-contained drone-preflight brief. One HTML file: no backend,
+     build step, API keys, npm, or map library. Vanilla JS only. Located by GPS;
+     a full-screen card interface carries the flyability chart (with a verdict
+     clock in its top-left corner) above a distance-sorted SITREP of nearby
+     aircraft, airspace and hazards. Data refreshes every 5 s; the overall verdict
+     reads off the clock colour (green = go, yellow = caution, red = no-go). Every
+     data feed is keyless and CORS-open. -->
+
+<style>
+  :root{
+    --bg:#000000; --line:#1a2730;
+    --ink:#d6e2ee; --ink-dim:#748596;
+    /* the three verdict colours — go / caution / no-go — used everywhere a
+       severity is shown (clock, chart cells, card text). Caution is YELLOW. */
+    --go:#2fe07a; --caution:#ffd43b; --nogo:#ff4455;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+    --safe-top:env(safe-area-inset-top,0px);
+    --safe-bottom:env(safe-area-inset-bottom,0px);
+  }
+  /* read-only display: no text selection, callout, tap highlight, or double-tap zoom */
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  /* height:100% (not dvh — iOS Safari's floating URL bar makes dvh resolve short) */
+  /* text-size-adjust:100% stops iOS Safari from auto-inflating the list text for a beat
+     on an orientation flip (the "fonts go wild for a second" glitch). */
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:var(--mono);font-size:13px;overflow:hidden;
+    -webkit-text-size-adjust:100%;text-size-adjust:100%;
+    overscroll-behavior:none;touch-action:manipulation;text-transform:uppercase}
+  /* the SITREP still scrolls, but double-tap / pinch zoom is disabled everywhere */
+  #sit-body{touch-action:pan-y}
+  button{font-family:var(--mono);cursor:pointer}
+  a{color:var(--go)}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:#233247;border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---- APP SHELL — ONE full-screen column on every device (iPhone-first). On wide
+          screens it's centred at a phone-like max width so all devices match. ---- */
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;
+    width:100%;max-width:620px;margin:0 auto;
+    border-left:1px solid var(--line);border-right:1px solid var(--line)}
+
+  /* ---- FLYABILITY CHART — the top section, sized to its content ---- */
+  #fly-pane{flex:0 0 auto;min-height:0;border-bottom:1px solid var(--line);background:#000;
+    display:flex;flex-direction:column;align-items:center;
+    gap:min(1.6vh,10px);padding:calc(var(--safe-top) + 10px) 14px min(2vh,12px)}
+  #fly-board{position:relative;width:100%;max-width:560px}
+  #fly-pane .grid{width:100%;border:1px solid var(--line);border-radius:12px;
+    padding:8px 10px;display:grid;
+    grid-template-columns:minmax(0,1.15fr) repeat(4,minmax(0,1fr));   /* labels + NOW..+3h */
+    align-content:center;font-variant-numeric:tabular-nums}
+  #fly-pane .grow{display:contents}
+  #fly-pane .ga,#fly-pane .gc{display:flex;align-items:center;min-width:0;white-space:nowrap;
+    padding:5px 6px;line-height:1}
+  #fly-pane .ga{justify-content:flex-start;color:var(--ink);letter-spacing:.03em;font-size:12px}
+  #fly-pane .gc{justify-content:center;font-weight:700;font-size:15px;
+    color:var(--ink);border-left:1px solid #16212b}   /* faint rule between time columns */
+  /* reference-unit tags (FT, MPH) */
+  #fly-pane .gu{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
+  /* cell fills — binary: fly / can't fly */
+  #fly-pane .gc.good{background:rgba(47,224,122,.14);color:var(--go)}
+  #fly-pane .gc.bad{background:rgba(255,68,85,.16);color:var(--nogo)}
+  #fly-pane .ga.bad{color:var(--nogo)}
+  #fly-pane .ghead .gc.bad{background:none;color:var(--nogo)}
+  #fly-pane .ghead .ga,#fly-pane .ghead .gc{border-bottom:1px solid var(--line);
+    padding-bottom:5px;font-weight:500;font-size:12px;color:var(--ink)}
+  #fly-pane .ghead .gc{border-left:0}
+  #fly-pane .ghead .gc.now{font-weight:700}
+  /* the NOW header follows the overall verdict colour, exactly like the clock */
+  #fly-pane .ghead .gc.now.go{color:var(--go)}
+  #fly-pane .ghead .gc.now.caution{color:var(--caution)}
+  #fly-pane .ghead .gc.now.nogo{color:var(--nogo)}
+  #fly-pane .ga.hi{font-weight:700}
+  #fly-pane .ggust .ga,#fly-pane .ggust .gc{border-top:1px solid rgba(116,133,150,.4)}
+  /* a cap/gate code cell (GUST/VIS/SKY/WIND/FAA/TRFC/PCPN/KPx) */
+  #fly-pane .gc.rsn{font-size:13px;font-weight:800;letter-spacing:.03em}
+  /* VERDICT CLOCK — the chart's top-left header cell: live local time, tinted by the
+     overall verdict so a glance at the corner answers "can I fly right now?" */
+  #fly-pane .ga.clock{font-weight:800;font-size:15px;letter-spacing:.02em}
+  #fly-pane .ga.clock.go{color:var(--go)}
+  #fly-pane .ga.clock.caution{color:var(--caution)}
+  #fly-pane .ga.clock.nogo{color:var(--nogo)}
+  /* loading shimmer — one cell-text line tall, so nothing shifts on load */
+  @keyframes flypulse{0%,100%{opacity:1}50%{opacity:.2}}
+  #fly-pane .sk{display:block;border-radius:4px;background:var(--ink-dim);opacity:.22;
+    width:58%;height:15px;margin:0 auto;animation:flypulse 1.6s ease-in-out infinite}
+  @media (prefers-reduced-motion:reduce){#fly-pane .sk{animation:none}}
+
+  /* ---- SITREP — scrolling list of nearby aircraft / airspace / hazards, fills the rest ---- */
+  #sit-body{display:flex;flex-direction:column;overflow-y:auto;
+    padding:4px 0 calc(var(--safe-bottom) + 6px);-webkit-overflow-scrolling:touch;
+    flex:1 1 auto;min-height:0}
+/* every SITREP row is a uniform info-only 3-line block: icon • three text lines.
+flex:0 0 auto (no shrink) keeps a row at its natural height whether the list fits or
+overflows - without it, the flex column squeezes rows toward min-height once they
+scroll, so cards changed size between the fit and scroll states. */
+  .sit-row{flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:8px 12px;font-size:13px;
+    min-height:62px;border-bottom:1px solid #10171f}
+  .sit-row .ic{flex:0 0 30px;text-align:center;align-self:center;
+    font-size:23px;line-height:1;text-transform:none}
+  .sit-row .tx{flex:1;min-width:0;line-height:1.34;display:flex;flex-direction:column;justify-content:center}
+  .sit-row .tx .s1,.sit-row .tx .s2,.sit-row .tx .s3{display:block;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}   /* any overlong line truncates with … */
+  .sit-row .tx .s1{color:var(--ink);letter-spacing:.3px}
+  .sit-row .tx .s2,.sit-row .tx .s3{color:var(--ink-dim);font-size:12px}
+  .sit-row.alert .s1{color:var(--caution)}   /* yellow-alert card */
+  .sit-row.danger .s1{color:var(--nogo)}     /* red-warning card */
+  .sit-empty{padding:14px 12px;font-size:13px;color:var(--ink-dim);line-height:1.5}
+  /* units keep their own casing/spacing inside the upper-cased body (.lc = keep lowercase) */
+  .u{letter-spacing:0;font-style:normal}
+  .u.lc{text-transform:none}
+
+  /* ---- LANDSCAPE — a wide, short viewport has no room for chart-over-list, so lay them
+          SIDE BY SIDE: chart on the LEFT, the scrolling SITREP on the RIGHT. ---- */
+  @media (orientation:landscape){
+    #app{flex-direction:row;max-width:none}
+    #fly-pane{flex:0 1 auto;max-width:60%;min-width:0;justify-content:center;
+      border-bottom:none;border-right:1px solid var(--line);
+      padding:10px 14px;padding-left:calc(env(safe-area-inset-left,0px) + 14px)}
+    #sit-body{flex:1 1 0;padding-top:calc(var(--safe-top) + 4px);
+      padding-right:calc(env(safe-area-inset-right,0px))}
+  }
+</style>
+</head>
+<body>
+<!-- One full-screen column on every device: the flyability chart (with a verdict clock
+     in its top-left corner), then the scrolling SITREP. The overall verdict is the
+     clock colour — there is no map. -->
+<main id="app">
+  <section id="fly-pane">
+    <div id="fly-board" role="group" aria-label="canifly"></div>
+  </section>
+  <!-- hidden canonical verdict element; sitrepTick stamps its class (tests/parity) -->
+  <span id="sit-title" hidden></span>
+  <div id="sit-body">
+    <!-- boot shows loading chart + GPS card; no empty "acquiring" screen -->
+  </div>
+</main>
+
+
+<script>
+"use strict";
+/* =====================================================================
+   0. helpers
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+const el = (t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+async function getJSON(url,opts={}){
+  const c=new AbortController(); const to=setTimeout(()=>c.abort(),opts.timeout||15000);
+  try{
+    const r=await fetch(url,{signal:c.signal,headers:opts.headers||{}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json();
+  } finally { clearTimeout(to); }
+}
+// All times shown in the user's LOCAL time — the browser's own timezone (which, for a
+// GPS-located device, is the local zone). USER.tz is honoured if ever set.
+const tzOpt = () => USER.tz ? {timeZone:USER.tz} : {};
+// THE data-refresh cadence, seconds. Everything live reads this one knob: the
+// auto-refresh pulse, the every-pulse feeds (refresh:REFRESH_S below) and the
+// per-layer cadences (refresh/REFRESH_S pulses). Feeds with their own natural
+// cadence declare it explicitly (NWS 15 s, SPC 15 min, Kp ~3 min, radar via
+// RADAR_BUST_SECONDS, winds-aloft via ALOFT_TTL_MS) so a faster pulse doesn't hammer
+// sources whose data doesn't change that fast.
+const REFRESH_S=5;
+// persist a setting; storage can be blocked (private mode) and that's fine
+const store=(k,v)=>{ try{ localStorage.setItem(k,String(v)); }catch(e){} };
+// equirectangular °-offsets spanning `km` at a latitude — THE lat/lon↔km math, shared by
+// the distance tests and the stadium-buffer geometry so they agree on how far a mile is.
+const geoDeltas=(km,lat)=>({dLat:km/111.32,
+  dLon:km/(111.32*Math.max(0.2,Math.cos(lat*Math.PI/180)))});
+// a closed [lon,lat] ring approximating a km-radius circle (equirectangular — exact enough
+// at these radii); used to buffer stadium points into their 3 nm TFR polygons
+function circleRing(lat,lon,km,n){
+  const {dLat,dLon}=geoDeltas(km,lat), ring=[];
+  for(let i=0;i<=n;i++){ const t=i/n*2*Math.PI;
+    ring.push([lon+dLon*Math.cos(t), lat+dLat*Math.sin(t)]); }
+  return ring;
+}
+// great-circle distance, km
+function havKm(lat1,lon1,lat2,lon2){
+  const R=6371,d=Math.PI/180;
+  const a=Math.sin((lat2-lat1)*d/2)**2+
+    Math.cos(lat1*d)*Math.cos(lat2*d)*Math.sin((lon2-lon1)*d/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+// Initial compass bearing from point 1 → point 2, degrees (0=N, clockwise).
+function bearing(lat1,lon1,lat2,lon2){
+  const d=Math.PI/180;
+  const y=Math.sin((lon2-lon1)*d)*Math.cos(lat2*d);
+  const x=Math.cos(lat1*d)*Math.sin(lat2*d)-Math.sin(lat1*d)*Math.cos(lat2*d)*Math.cos((lon2-lon1)*d);
+  return (Math.atan2(y,x)/d+360)%360;
+}
+const COMPASS8=['N','NE','E','SE','S','SW','W','NW'];
+const compass=deg=>COMPASS8[Math.round(deg/45)%8];
+// wraps a unit token; lc:true preserves case for units that need it (see .u.lc)
+const U = (s,lc) => `<span class="u${lc?' lc':''}">${s}</span>`;
+const fmtMi = km => { const mi=km*0.621371;
+  return mi<0.5?Math.round(mi*5280)+U(' ft'):mi<100?mi.toFixed(1)+U(' mi'):Math.round(mi)+U(' mi'); };
+
+// ADS-B: airplanes.live primary, adsb.fi fallback (readsb /v2 schema)
+const ADSB_HOSTS=['https://api.airplanes.live/v2','https://opendata.adsb.fi/api/v2'];
+async function adsb(path){
+  let err;
+  for(const h of ADSB_HOSTS){   // 9s/host: fall to the next mirror before a stuck one hangs the load
+    try{ return await getJSON(h+path,{timeout:9000}); }catch(e){ err=e; }
+  }
+  throw err||new Error('all ADS-B hosts unreachable');   // treated as error → keep existing planes, retry
+}
+const KM_TO_NM=0.539957, ADSB_MAX_NM=100;
+// Fetch radius = the fixed #3 DATA RADIUS (DATA_MI), centred on your GPS position, so
+// every plane in the area is pulled. Floor 15 nm covers the 5 mi net; 100 nm cap is a guard.
+function adsbRadiusNm(){
+  return Math.min(ADSB_MAX_NM,Math.max(15,Math.ceil(DATA_MI*MI_TO_KM*KM_TO_NM)));
+}
+async function adsbViewport(){
+  // Centred on YOUR GPS position (only ever called after a fix).
+  const j=await adsb('/point/'+USER.lat.toFixed(3)+'/'+USER.lon.toFixed(3)+'/'+adsbRadiusNm());
+  return {ac:j.ac||[]};
+}
+// rotorcraft? ICAO emitter category A7, else a helicopter/rotor mention in the description
+const isHeli=a=>a.category==='A7'||/helicopter|\brotor/i.test(a.desc||'');
+// ONE property builder for every ADS-B contact (civil/mil/emergency feeds), so the
+// card / chart / AGL fields never drift apart between feeds.
+function acProps(a,kind){
+  return {_kind:kind, heli:isHeli(a)?1:0,
+    flight:String(a.flight||a.r||a.hex||'?').trim(),
+    reg:String(a.r||'').trim(),   // tail registration, a line-2 fallback
+    type:a.t||'?',desc:a.desc||'',op:a.ownOp||'',
+    alt:a.alt_baro??a.alt_geom??'?',
+    // barometric altitude kept separate so AGL can QNH-correct it; null if only geometric
+    altBaro:(typeof a.alt_baro==='number'?a.alt_baro:null),
+    spd:a.gs!=null?Math.round(a.gs):'?',
+    trk:a.track!=null?Math.round(a.track):null,
+    _rot:a.track!=null?a.track:(a.true_heading!=null?a.true_heading:0),
+    sq:a.squawk||'',hex:a.hex||'',mil:a.dbFlags&1?1:0};
+}
+const acFeature=(a,kind,extra)=>({type:'Feature',
+  geometry:{type:'Point',coordinates:[a.lon,a.lat]},
+  properties:extra?Object.assign(acProps(a,kind),extra):acProps(a,kind)});
+function acFeatures(j,kind){
+  return (j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null).map(a=>acFeature(a,kind));
+}
+// features last loaded for a layer id (from our own LAYER_STATE — the stored fetch result)
+function featsIn(id){const st=LAYER_STATE[id];return (st&&st.features)||[];}
+// ArcGIS envelope (west,south,east,north) for the airspace/NPS pulls — a fixed
+// DATA_MI (#3) box centred on your GPS position, so airspace covers the same 25 mi as
+// the aircraft pull, identical on every device. Only called after a fix. Refetched when
+// you move (see refetchNearbyOnMove). A box circumscribes the 25 mi circle; the SITREP
+// then cards zones within the 25 mi radius, exactly like aircraft.
+function viewEnv(){
+  const {dLat,dLon}=geoDeltas(DATA_MI*MI_TO_KM,USER.lat);
+  return [USER.lon-dLon,USER.lat-dLat,USER.lon+dLon,USER.lat+dLat].map(n=>n.toFixed(3)).join(',');
+}
+// polygon feature -> a representative [lon,lat] (first vertex)
+function polyPt(f){
+  const g=f.geometry; if(!g) return null;
+  if(g.type==='Point') return g.coordinates;
+  if(g.type==='Polygon') return g.coordinates[0] && g.coordinates[0][0];
+  if(g.type==='MultiPolygon') return g.coordinates[0] && g.coordinates[0][0] && g.coordinates[0][0][0];
+  return null;
+}
+// nearest point on a polygon's boundary to (lon,lat) — projected onto the nearest
+// edge segment (not just a vertex); drives a zone's distance/direction and range test.
+// Planar lon/lat with a cos(lat) x-scale. Returns {pt:[lon,lat], km}.
+function nearestEdge(f,lon,lat){
+  const g=f.geometry; if(!g) return null;
+  const rings=g.type==='Polygon'?g.coordinates:g.type==='MultiPolygon'?g.coordinates.flat():[];
+  const k=Math.cos(lat*Math.PI/180)||1e-6;
+  let best=null,bd=Infinity;
+  rings.forEach(r=>{ for(let i=0;i+1<r.length;i++){
+    const ax=(r[i][0]-lon)*k, ay=r[i][1]-lat, bx=(r[i+1][0]-lon)*k, by=r[i+1][1]-lat;
+    const dx=bx-ax, dy=by-ay, l2=dx*dx+dy*dy;
+    let t=l2>0?-(ax*dx+ay*dy)/l2:0; t=t<0?0:t>1?1:t;
+    const cx=ax+t*dx, cy=ay+t*dy, d2=cx*cx+cy*cy;
+    if(d2<bd){ bd=d2; best=[lon+cx/k, lat+cy]; }
+  }});
+  return best?{pt:best,km:havKm(lat,lon,best[1],best[0])}:null;
+}
+// point-in-polygon (ray casting) — e.g. is a location inside an SPC outlook risk area
+function pointInRing(lon,lat,ring){
+  let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+    if(((yi>lat)!==(yj>lat)) && (lon<(xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function pointInFeature(f,lon,lat){
+  const g=f.geometry; if(!g) return false;
+  const polys=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
+  for(const poly of polys){
+    if(poly[0] && pointInRing(lon,lat,poly[0]) && !poly.slice(1).some(h=>pointInRing(lon,lat,h))) return true;
+  }
+  return false;
+}
+const escapeHtml =s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&','<':'<','>':'>','"':'"'}[c]));
+
+
+/* =====================================================================
+   1. RADAR TILE SOURCE — NEXRAD base-reflectivity mosaic (Iowa State Mesonet,
+   keyless). There is no map, so these tiles are never DRAWN — the precipitation
+   gate SAMPLES them on an offscreen canvas (see sampleRadarPrecip). A ?bust query
+   pulls a fresh mosaic once per RADAR_BUST_S window (the source updates ~5 min);
+   the sampler's memo keys on that bust value, so advancing it invalidates old scans.
+   ===================================================================== */
+const RADAR_TILE_URL='https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png';
+const RADAR_BUST_SECONDS=60;
+const currentRadarBust=()=>Math.floor(Date.now()/(RADAR_BUST_SECONDS*1000));
+let radarBustWindow=currentRadarBust();
+// advance the shared bust window; the precip sampler's memo keys on it, so a new
+// window simply invalidates the cached scans (there is nothing to redraw).
+function refreshRadar(){ const b=currentRadarBust(); if(b!==radarBustWindow) radarBustWindow=b; }
+
+// debug/test handle — modules attached as the app wires up (see boot)
+window.__sitrep={};
+
+/* =====================================================================
+   2. DATA FEED DEFINITIONS
+   Each feed is {id, label, refresh (sec), viewport?, loader}. loader() returns a GeoJSON
+   FeatureCollection (or null = keep current); its features are STORED in LAYER_STATE for
+   the SITREP and chart to read — there is no map, so nothing is drawn. viewport:true means
+   the feed is scoped to your GPS area and refetches when you move. A loader throws on
+   failure → the runtime keeps the last-good data and retries on a short backoff.
+   ===================================================================== */
+const LAYERS=[];
+const defLayer=c=>LAYERS.push(c);
+// your GPS position — {lat,lon} once fixed; acc = fix accuracy (m); ts = last-fix time.
+const USER={lat:null,lon:null,src:null,acc:null,tz:'',ts:0};
+
+/* ---------------- Aircraft ----------------
+   Every layer def is just {id, label, refresh, viewport?, loader}. The loader returns a
+   GeoJSON FeatureCollection whose features the SITREP reads (there is no map). Emergency
+   squawks get NO special treatment — a plane in distress is a general aircraft, caught by
+   the position-scoped `nearair` pull like any other. */
+defLayer({
+  id:'nearair', label:'Aircraft (nearby)', refresh:REFRESH_S,
+  viewport:true,   // scoped to your GPS area → refetched when you move + every pulse
+  loader: async ()=>
+    ({type:'FeatureCollection',
+      features:acFeatures(await adsbViewport(),'nearair').filter(f=>!f.properties.mil)})
+});
+
+defLayer({
+  id:'mil', label:'Military aircraft', refresh:REFRESH_S,
+  loader: async ()=> ({type:'FeatureCollection',features:acFeatures(await adsb('/mil'),'mil')})
+});
+
+
+/* ---------------- Hazard / Environment ---------------- */
+defLayer({
+  // NOAA/NWS active alerts, WARNINGS ONLY (no watches/advisories/statements). Keyless,
+  // CORS *. Polygons where present (tornado / severe-tstorm / flash-flood / red-flag);
+  // the SITREP cards any warning whose area contains you.
+  id:'nws', label:'NWS warnings (US)', refresh:15,   // alerts churn slowly
+  loader: async ()=>{
+    const j=await getJSON('https://api.weather.gov/alerts/active',{timeout:20000});
+    const feats=[];
+    (j.features||[]).forEach(f=>{
+      const p=f.properties||{}, ev=(p.event||'').trim();
+      if(!/warning$/i.test(ev)) return;   // WARNINGS only — excludes Watch/Advisory/Statement
+      if(!f.geometry) return;             // needs an area polygon to test containment
+      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'nws',
+        event:ev,severity:p.severity||'',area:p.areaDesc||'',ends:p.ends||p.expires||'',
+        // card headline tint matches its tier: Extreme/Severe = red, else yellow
+        _col:/Extreme|Severe/i.test(p.severity)?'#ff4455':'#ffd43b'}});
+    });
+    return {type:'FeatureCollection',features:feats};
+  }
+});
+
+defLayer({
+  // SPC Day-1 Convective Outlook (US): where severe weather is expected today
+  // (categorical risk + tornado-prob polygons). Keyless. Loads so the SITREP can flag
+  // "you're in an Enhanced/tornado area".
+  id:'spc', label:'Severe wx outlook (US)', refresh:900,
+  loader: async ()=>{
+    const base='https://www.spc.noaa.gov/products/outlook/';
+    const [cat,torn]=await Promise.all([
+      getJSON(base+'day1otlk_cat.nolyr.geojson',{timeout:20000}).catch(()=>null),
+      getJSON(base+'day1otlk_torn.nolyr.geojson',{timeout:20000}).catch(()=>null)]);
+    const RANK={TSTM:0,MRGL:1,SLGT:2,ENH:3,MDT:4,HIGH:5};
+    const feats=[];
+    ((cat&&cat.features)||[]).forEach(f=>{ const p=f.properties||{}; if(!f.geometry) return;
+      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'spc',kind:'cat',
+        code:p.LABEL||'',label:p.LABEL2||p.LABEL||'',rank:RANK[p.LABEL]||0,_col:p.fill||'#ffd43b'}}); });
+    ((torn&&torn.features)||[]).forEach(f=>{ const p=f.properties||{}; if(!f.geometry) return;
+      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'spc',kind:'torn',
+        code:p.LABEL||'',label:p.LABEL2||p.LABEL||'',sig:/SIGN/i.test(p.LABEL||''),_col:p.fill||'#ff2d55'}}); });
+    return {type:'FeatureCollection',features:feats};
+  }
+});
+
+// airspace FLOOR in feet: SFC/blank/0 → 0; FL180 → 18000; a number → that; else 0
+// (conservative). Used to drop zones that begin above the drone band.
+function floorFt(v){
+  if(v==null) return 0;
+  const s=String(v).trim().toUpperCase();
+  if(s===''||/^(SFC|SURF|GND|GROUND|0)$/.test(s)) return 0;
+  const fl=s.match(/FL\s*0*(\d+)/); if(fl) return +fl[1]*100;
+  const n=parseFloat(s.replace(/[, ]/g,''));
+  return isFinite(n)?n:0;
+}
+
+defLayer({
+  // FAA AIRSPACE — the zones that gate low drone flight, listed on the SITREP. Keyless FAA
+  // ArcGIS: controlled airspace (B/C/D + surface-E2), national-defense TFRs (ceiling→0), low
+  // SUA, NSUFR, stadiums. Each feature carries a per-class identity colour (_col) used to
+  // tint its card headline. Scoped to your GPS area, refetched when you move. This listing is
+  // CONTEXT only — the canifly gate runs its own strict point-buffer query (getAirspace), so
+  // a soft-failing feed here never understates a no-fly.
+  id:'airspace', label:'FAA airspace + restrictions', viewport:true,
+  loader: async ()=>{
+    const env=viewEnv();
+    // maxAllowableOffset generalises the geometry server-side (~440 m) — the SITREP only needs
+    // nearest-edge distance, so exact vertices don't matter, and it roughly halves the payload
+    // over the 25 mi box (a dense Class-B metro drops from ~2.2 MB to ~1 MB) so the query
+    // lands well inside its timeout instead of failing on a slow connection.
+    const q=(svc,fields,where)=>`https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/${svc}/FeatureServer/0/query`
+      +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
+      +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&maxAllowableOffset=0.004&outFields=${fields}`
+      +(where?`&where=${encodeURIComponent(where)}`:'')+`&f=geojson`;
+    // five feeds. Class_Airspace is filtered server-side to B/C/D + surface-E2 so the huge
+    // Class-E5 never hits the wire; it's the heavy one, so it gets the longest timeout.
+    const [cls,def,sua,nsufr,stad]=await Promise.all([
+      getJSON(q('Class_Airspace','NAME,CLASS,LOCAL_TYPE',"CLASS IN ('B','C','D') OR LOCAL_TYPE='CLASS_E2'"),{timeout:10000}).catch(()=>null),
+      getJSON(q('National_Defense_Airspace_TFR_Areas','NAME'),{timeout:9000}).catch(()=>null),
+      getJSON(q('Special_Use_Airspace','NAME,TYPE_CODE,UPPER_VAL,LOWER_VAL'),{timeout:10000}).catch(()=>null),
+      getJSON(q('Part_Time_National_Security_UAS_Flight_Restrictions','Facility,Floor,Ceiling'),{timeout:9000}).catch(()=>null),
+      getJSON(q('Stadiums','NAME'),{timeout:9000}).catch(()=>null)]);
+    // A feed "failed" if the fetch threw (null) OR it came back as an FAA error-in-200 /
+    // malformed body — these ArcGIS services routinely answer HTTP 200 with {error:{…}} or a
+    // non-array features under load, which is NOT "no airspace here". Treat that as a failure
+    // so the runtime keeps the last-good listing and the DATA warning up, and RETRIES, rather
+    // than clearing to empty. If the PRIMARY (Class_Airspace) feed is bad — or every feed is —
+    // throw. A genuine empty area returns a clean {features:[]}, so it's kept (nothing to show)
+    // without tripping this; minor-feed blips still fail soft.
+    const bad=r=>r==null||r.error||!Array.isArray(r.features);
+    if(bad(cls) || [cls,def,sua,nsufr,stad].every(bad)) throw new Error('airspace feeds unreachable');
+    const feats=[];
+    const push=(geom,props)=>{ if(geom) feats.push({type:'Feature',geometry:geom,properties:props}); };
+    // controlled airspace around airports (advisory, aeronautical blue/magenta)
+    const CTRL={B:'#5b8def',C:'#c06ad0',D:'#5b8def'};
+    ((cls&&cls.features)||[]).forEach(f=>{ const p=f.properties||{},cl=p.CLASS;
+      if(!(/^[BCD]$/.test(cl)||p.LOCAL_TYPE==='CLASS_E2')||!f.geometry) return;
+      push(f.geometry,{_kind:'airspace',sev:'ctrl',cls:cl,code:cl,name:p.NAME||'',_col:CTRL[cl]||'#c06ad0'}); });
+    // national-defense TFR zones — hard no-fly. Airspace fills use a COOL identity palette
+    // kept OFF the green/yellow/red verdict colours (violet = no-fly · cyan = conditional ·
+    // blue/magenta = controlled · steel = advisory); severity is carried by the card position,
+    // card position and clock, not the fill hue.
+    ((def&&def.features)||[]).forEach(f=>push(f.geometry,{_kind:'airspace',sev:'hard',cls:'DEF',code:'DEF',
+      name:(f.properties&&f.properties.NAME)||'',_col:'#7c5cff'}));
+    // special-use airspace, right-sized to a drone at ≤400 ft:
+    //   • Prohibited (P)        → HARD no-fly (red)
+    //   • Restricted (R)        → CONDITIONAL no-fly (yellow, only when active)
+    //   • MOA/Warning/Alert/Danger → ADVISORY (they don't restrict a Part-107
+    //     drone — military/hazard activity to be aware of, not a no-fly)
+    // zones whose FLOOR is above the drone band (400 ft) are dropped — irrelevant here
+    // hard→violet · conditional→cyan · advisory→steel — none in the verdict (R/A/G) palette
+    const SUA={P:['hard','PROH','#7c5cff'],R:['caution','RSTD','#22d3ee'],
+      MOA:['advisory','MOA','#8fa3bf'],W:['advisory','WARN','#8fa3bf'],A:['advisory','ALRT','#8fa3bf'],D:['advisory','DNGR','#8fa3bf']};
+    ((sua&&sua.features)||[]).forEach(f=>{ const p=f.properties||{},t=SUA[p.TYPE_CODE]; if(!t||!f.geometry) return;
+      if(floorFt(p.LOWER_VAL)>SPEC.regFt) return;   // starts above the drone band → irrelevant
+      push(f.geometry,{_kind:'airspace',sev:t[0],cls:p.TYPE_CODE,code:t[1],
+        name:p.NAME||'',lo:p.LOWER_VAL,hi:p.UPPER_VAL,_col:t[2]}); });
+    // part-time national-security UAS zones — hard no-fly for drones (violet)
+    ((nsufr&&nsufr.features)||[]).forEach(f=>{ const p=f.properties||{};
+      if(floorFt(p.Floor)>SPEC.regFt) return;
+      push(f.geometry,{_kind:'airspace',sev:'hard',cls:'NSUFR',code:'NSUF',
+        name:p.Facility||'security zone',lo:p.Floor,hi:p.Ceiling,_col:'#7c5cff'}); });
+    // stadiums → 3 nm (5.556 km) rings (the 99.7 event TFR), conditional (cyan, not verdict yellow)
+    ((stad&&stad.features)||[]).forEach(f=>{ const g=f.geometry; if(!g||g.type!=='Point') return;
+      push({type:'Polygon',coordinates:[circleRing(g.coordinates[1],g.coordinates[0],5.556,48)]},
+        {_kind:'airspace',sev:'caution',cls:'STDM',code:'STDM',name:(f.properties&&f.properties.NAME)||'stadium',_col:'#22d3ee'}); });
+    return {type:'FeatureCollection',features:feats};
+  }
+});
+
+defLayer({
+  // NATIONAL PARK SERVICE lands — NPS prohibits operating a drone from within a unit, so a
+  // preflight treats it as hard no-fly. Card headline tinted earthy olive (_col, ground — not
+  // airspace). Keyless NPS ArcGIS, scoped to your GPS area; boundary generalised ~150 m.
+  id:'nps', label:'National Park Service lands', viewport:true,
+  loader: async ()=>{
+    const env=viewEnv();
+    const url='https://services1.arcgis.com/fBc8EJBxQRMcHlei/ArcGIS/rest/services/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2/query'
+      +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
+      +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&maxAllowableOffset=0.0015`
+      +'&outFields=UNIT_NAME,UNIT_TYPE&f=geojson';
+    const j=await getJSON(url,{timeout:15000});
+    const feats=[];
+    (j.features||[]).forEach(f=>{ if(!f.geometry) return; const p=f.properties||{};
+      feats.push({type:'Feature',geometry:f.geometry,properties:{_kind:'nps',
+        name:p.UNIT_NAME||'',utype:p.UNIT_TYPE||'',_col:'#9c8b3e'}}); });
+    return {type:'FeatureCollection',features:feats};
+  }
+});
+
+/* =====================================================================
+   3. FEED RUNTIME — per-feed fetch state + the unified 5 s refresh pulse
+   ===================================================================== */
+const LAYER_STATE={};
+// SITREP re-reads layer data every refresh — debounced so a burst of layer updates
+// recomputes once. The chart repaints FIRST (its TRFC cells read the aircraft layers)
+// so the SITREP tick can colour its title from the chart's fresh NOW column.
+let sitrepRefreshT=null;
+function scheduleSitrep(){ clearTimeout(sitrepRefreshT); sitrepRefreshT=setTimeout(()=>{
+  try{if(FLY.data)flyPaint();}catch(e){console.warn('[fly-paint]',e);}
+  try{sitrepTick();}catch(e){console.warn('[sitrep]',e);} },300); }
+
+// Ground elevation (ft AMSL) for AGL = alt − ground, cached by ~1 km cell.
+// groundElevFt() is a synchronous read (null until known); ensureGroundElev() kicks the
+// fetch. Terrain is sampled UNDER EACH PLANE so AGL stays right over rolling ground.
+// A FAILED lookup is NEVER cached (a poisoned 0 would silently disable AGL in high
+// terrain) — it backs off and retries on a later tick.
+const _elevCache={}; let _elevBusy=false, _elevFailAt=0, _elevAt=0;
+const ELEV_RETRY_MS=15000;
+// Cooldown between elevation fetches — without it, cells that never cache (plane over
+// water → non-finite elevation) would loop-fetch and rate-limit the weather pull (same host).
+const ELEV_COOLDOWN_MS=20000;
+const elevKey=(la,lo)=>la.toFixed(2)+','+lo.toFixed(2);
+function groundElevFt(la,lo){
+  const v=_elevCache[elevKey(la,lo)];
+  return v==null?null:v;
+}
+// Pull elevation for any uncached [lat,lon] cells in one batched request (deduped +
+// capped), then re-run the SITREP so AGL fills in.
+function ensureGroundElev(pts){
+  if(_elevBusy || Date.now()-_elevFailAt<=ELEV_RETRY_MS || Date.now()-_elevAt<ELEV_COOLDOWN_MS) return;
+  const need=[], seen=new Set();
+  for(const p of pts){ if(!p||!isFinite(p[0])||!isFinite(p[1])) continue;
+    const k=elevKey(p[0],p[1]); if((k in _elevCache)||seen.has(k)) continue;
+    seen.add(k); need.push([p[0],p[1],k]); }
+  if(!need.length) return;
+  const batch=need.slice(0,90);
+  _elevBusy=true; _elevAt=Date.now();
+  const lats=batch.map(n=>n[0].toFixed(4)).join(',');
+  const lons=batch.map(n=>n[1].toFixed(4)).join(',');
+  getJSON(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`,{timeout:9000})
+    .then(d=>{ const arr=d&&Array.isArray(d.elevation)?d.elevation:null;
+      if(arr&&arr.length===batch.length){
+        batch.forEach((n,idx)=>{ const m=arr[idx];
+          if(typeof m==='number'&&isFinite(m)) _elevCache[n[2]]=m*M_TO_FT; }); }
+      else _elevFailAt=Date.now(); })
+    .catch(()=>{ _elevFailAt=Date.now(); })
+    .finally(()=>{ _elevBusy=false; scheduleSitrep(); });
+}
+// Local sea-level pressure [hPa] (≈ QNH) from the weather pull — converts ADS-B
+// pressure altitude to true MSL. null until the first weather fetch lands.
+let QNH_HPA=null;
+
+// retry backoff while a layer is failing — short and bounded (1.5s, 3s, 4.5s, cap 6s) so a
+// recovering feed is caught within seconds. Shared by the quickTimer and the pulse skip gate.
+const failBackoffMs=n=>Math.min(6000,1500*n);
+
+async function runLayer(cfg){
+  const st=LAYER_STATE[cfg.id];
+  // Generation token: a call only writes if it's still the newest, so overlapping
+  // refreshes (move + tick) finishing out of order can't clobber fresh data.
+  // st.loading lets the scheduler skip a layer that's still fetching.
+  const myGen=++st.gen;
+  st.loading=true; st.loadStart=Date.now();
+  try{
+    if(st.quickTimer){ clearTimeout(st.quickTimer); st.quickTimer=null; }
+    // one quick in-loop retry (a single dropped connection often clears at once); a
+    // persistent failure hands off to the fast quickTimer below rather than burning more
+    // time here (these are small queries — recovery should be seconds, not tens of seconds)
+    let lastErr=null;
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const fc=await cfg.loader();
+        if(myGen!==st.gen) return;               // superseded by a newer refresh — drop this result
+        // a null result = "no update" — keep what's loaded. Features are STORED for the
+        // SITREP/chart to read; there is no map layer to push them to.
+        if(fc) st.features=fc.features||[];
+        st.fails=0; st.failSince=0; st.everLoaded=true;   // recovered / printed at least once
+        scheduleSitrep();   // SITREP re-reads the fresh data as part of the refresh
+        return;
+      }catch(e){
+        lastErr=e;
+        if(myGen!==st.gen) return;                // a newer refresh owns the layer now
+        if(attempt<1){
+          await new Promise(r=>setTimeout(r,500));
+          if(myGen!==st.gen) return;
+        }
+      }
+    }
+    // Failed this cycle — NEVER discard the data; keep features and retry on a SHORT bounded
+    // backoff (1.5→6s) so a recovering feed is caught within a few seconds (a viewport
+    // layer like airspace has no pulse cadence — this quickTimer is its only retry path).
+    st.fails=(st.fails||0)+1; st.failAt=Date.now();   // the pulse backs off while failing
+    if(!st.failSince) st.failSince=Date.now();          // first fail of a run → start the sustained clock
+    console.warn('[layer '+cfg.id+']',lastErr&&lastErr.message);
+    if(!st.quickTimer){
+      const delay=failBackoffMs(st.fails);
+      st.quickTimer=setTimeout(()=>{ st.quickTimer=null; runLayer(cfg); },delay);
+    }
+  } finally {
+    if(myGen===st.gen) st.loading=false;
+  }
+}
+
+// ---- unified refresh: ONE pulse() drives every data kick. Scheduled pulls the DUE
+//      dynamic layers on their cadence; forced pulls every started layer. Both then
+//      kick the chart, weather and radar. Cadence-less viewport layers (airspace, NPS)
+//      don't ride the pulse — they refetch on recenter (see refreshViewport). ----
+// A stuck/slow mirror could hold st.loading through the whole retry chain (tens of
+// seconds), freezing the aircraft mid-air. Once a load runs past this, a pulse may
+// start a FRESH attempt — the generation token drops the stale one.
+const LOAD_STALL_MS=15000;   // ~ one full two-host ADS-B timeout; a healthy load is a second or two
+let refreshBase=Date.now(), pulseCount=0;
+function pulse(force){
+  if(!force) pulseCount++;   // forced pulls don't shift the slow-layer cadence grid
+  LAYERS.forEach(cfg=>{
+    const st=LAYER_STATE[cfg.id];
+    if(!st||!st.started) return;
+    if(st.loading && Date.now()-(st.loadStart||0)<LOAD_STALL_MS) return;   // fetching, not yet stalled
+    if(!force){
+      if(!(cfg.refresh>0)) return;
+      // refresh every N pulses (N = refresh/REFRESH_S), grid-aligned so a moveend
+      // that reset the countdown can't push a layer's refresh past a whole cycle
+      const everyN=Math.max(1,Math.round(cfg.refresh/REFRESH_S));
+      if(pulseCount%everyN!==0) return;
+      // a failing feed backs off on the shared short window; the quickTimer owns the retry
+      if(st.fails && Date.now()-(st.failAt||0)<failBackoffMs(st.fails)) return;
+    }
+    runLayer(cfg);
+  });
+  // the chart rides the same pulse; each of its inputs self-throttles inside
+  // flyRefresh()/loadWeather() on its own natural cadence
+  flyRefresh(); loadWeather(force); refreshRadar();
+  refreshBase=Date.now();   // restart the auto-refresh countdown from zero
+}
+function refreshTick(){ if(Date.now()-refreshBase>=REFRESH_S*1000) pulse(); }
+
+// initialise per-layer runtime state (features + fetch bookkeeping). There is no map, so
+// nothing is drawn — the loaders just populate LAYER_STATE[id].features for the SITREP.
+function initLayers(){
+  LAYERS.forEach(cfg=>{
+    LAYER_STATE[cfg.id]={features:[],started:false,everLoaded:false,
+      gen:0,quickTimer:null,fails:0,failSince:0,loading:false,loadStart:0};
+  });
+}
+
+/* =====================================================================
+   4. SPACE WEATHER + WEATHER FORECAST (SITREP cards)
+   NOAA SWPC (GOES X-ray flare) + Open-Meteo forecast — keyless. Kp is NOT fetched
+   here; the SPACE WEATHER card reads the chart's own kpNow so they always agree.
+   ===================================================================== */
+let XRAY=null; // latest GOES X-ray flare class
+async function loadXray(){
+  try{
+    const j=await getJSON('https://services.swpc.noaa.gov/json/goes/primary/xray-flares-latest.json');
+    const f=Array.isArray(j)?j[0]:j;
+    XRAY=(f&&(f.current_class||f.max_class))||null;
+  }catch(e){ XRAY=null; }
+  scheduleSitrep();
+}
+// ---- WEATHER FORECAST (Open-Meteo, keyless) — the always-present bottom SITREP card.
+//      Refetched when the GPS position moves >2 km or the reading ages past ~5 min.
+//      WMO codes map to emoji + plain-english condition. ----
+let WX=null, wxLat=null, wxLon=null, wxAt=0, wxBusy=false;
+const WMO={0:['☀️','clear'],1:['🌤️','mostly clear'],2:['⛅','partly cloudy'],3:['☁️','overcast'],
+  45:['🌫️','fog'],48:['🌫️','icy fog'],
+  51:['🌦️','light drizzle'],53:['🌦️','drizzle'],55:['🌧️','heavy drizzle'],56:['🌧️','freezing drizzle'],57:['🌧️','freezing drizzle'],
+  61:['🌧️','light rain'],63:['🌧️','rain'],65:['🌧️','heavy rain'],66:['🌧️','freezing rain'],67:['🌧️','freezing rain'],
+  71:['🌨️','light snow'],73:['🌨️','snow'],75:['🌨️','heavy snow'],77:['🌨️','snow grains'],
+  80:['🌦️','light showers'],81:['🌧️','showers'],82:['⛈️','heavy showers'],85:['🌨️','snow showers'],86:['🌨️','snow showers'],
+  95:['⛈️','thunderstorm'],96:['⛈️','storm, hail'],99:['⛈️','storm, hail']};
+async function loadWeather(force){
+  if(wxBusy || USER.lat==null) return;   // GPS-located only
+  if(!force && WX && wxLat!=null && havKm(wxLat,wxLon,USER.lat,USER.lon)<2 && Date.now()-wxAt<300000) return;
+  wxBusy=true;
+  try{
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${USER.lat.toFixed(3)}&longitude=${USER.lon.toFixed(3)}`
+      +`&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m`
+      +`&daily=temperature_2m_max,temperature_2m_min`
+      +`&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1`;
+    const d=await getJSON(u,{timeout:12000});
+    const cur=d.current||{}, day=d.daily||{};
+    WX={tempF:cur.temperature_2m, feelsF:cur.apparent_temperature, code:cur.weather_code,
+        windMph:cur.wind_speed_10m, windDir:cur.wind_direction_10m,
+        hiF:(day.temperature_2m_max||[])[0], loF:(day.temperature_2m_min||[])[0]};
+    wxLat=USER.lat; wxLon=USER.lon; wxAt=Date.now();
+  }catch(e){ /* keep the last-good WX */ }
+  finally{ wxBusy=false; scheduleSitrep(); }
+}
+// One SITREP card is a NAMED record, not a positional tuple, so the sort/render code reads
+// fields instead of magic indices. cls: '' / 'alert' (yellow) / 'danger' (red). hazard: feeds
+// the verdict colour (traffic omits it). col: an explicit headline hex (airspace / aircraft
+// identity colour). km: range for the in-category sort (set after construction). Absent
+// fields are undefined.
+const mkCard=(cls,ic,l1,l2,l3,hazard,col)=>({cls,ic,l1,l2,l3,hazard,col});
+// THE ONE weather card — a single feed, a single card. It changes rank/colour/text
+// with severity: a weather GATE limiting NOW promotes it to a top hazard (red grounded /
+// yellow reduced-ceiling) with conditions folded onto line 3; otherwise it's the routine
+// bottom conditions card ('stale' = last-good yellow, 'down' = never loaded, red+promoted).
+// Returns {pin, card}: pin floats it up with hazards.
+function wxCard(wxState, wn){
+  const rnd=n=>n==null?null:Math.round(n);
+  // compact conditions line — reused as line 3 of a promoted card so temp/sky/wind show once
+  const condLine=()=>{
+    if(!WX) return '';
+    const [,d]=WMO[WX.code]||['','—'];
+    const t=rnd(WX.tempF), w=rnd(WX.windMph), wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
+    return (t!=null?t+'° · ':'')+d.toUpperCase()+(w!=null?' · '+wd+w+U(' mph'):'');
+  };
+  // feed totally down — chart can't compute; pin it so the outage is unmissable
+  if(wxState==='down') return {pin:true, card:mkCard('danger','🌡️','WEATHER UNAVAILABLE',
+    'feed down · chart can\'t compute','retrying every 5 s',true)};
+  // The weather card's headline is driven by the chart's NOW binding reason (wn.reason),
+  // so it can NEVER show a different gate than the chart cell. Only the WEATHER reasons
+  // promote it; FAA / TRFC / Kp / restriction groundings are shown by their own cards, so
+  // for those the weather card stays the routine bottom card (no mismatched hazard).
+  if(wn){
+    const wxCap=Math.min(wn.windCeilFt,wn.cloudCapFt);   // weather-only ceiling (ft)
+    // headline per chart reason. GUST/VIS/PCPN are groundings; WIND (winds aloft) / SKY
+    // (cloud) are the weather CAPS — the same codes the chart prints in the cell.
+    const WXHEAD={
+      PCPN:['⛈️','PRECIPITATION','radar echo within '+GREY_MI+U(' mi')],
+      GUST:['💨','HIGH WIND','gust '+Math.round(wn.gustMph)+U(' mph')+' · max '+LIM.wind],
+      WIND:['💨','HIGH WIND',Math.round(wn.windPeakMph)+U(' mph')+' aloft · max '+LIM.wind],
+      VIS: ['🌫️','LOW VISIBILITY',(wn.visSM!=null?wn.visSM.toFixed(1):'—')+U(' SM')+' · min 3'+U(' SM')],
+      SKY: ['☁️','LOW CLOUD','base '+Math.round(wn.cloudCapFt+SPEC.clrFt)+U(' ft')+' · need 500 clr'],
+    };
+    // grounded by a weather reason → red, headline exactly matching the chart cell
+    if(wn.grounded && WXHEAD[wn.reason]){
+      const [ic,head,sub]=WXHEAD[wn.reason];
+      return {pin:true, card:mkCard('danger',ic,head,sub,condLine(),true)};
+    }               
+    // reduced ceiling (not grounded) where WEATHER is the binding cap → yellow
+    if(!wn.grounded && (wn.reason==='WIND'||wn.reason==='SKY') && wxCap<SPEC.regFt){
+      const wind=wn.reason==='WIND';
+      return {pin:true, card:mkCard('alert',wind?'💨':'☁️',(wind?'WIND':'CLOUD')+' CEILING '+wxCap+U(' ft'),
+        wind?'winds aloft over max':'low cloud base',condLine(),true)};
+    }
+    // PRECIPITATION NEARBY: an echo within DATA_MI but not yet grounding — yellow heads-up
+    if(wn.precipInbound){
+      return {pin:true, card:mkCard('alert','🌧️','PRECIPITATION NEARBY','radar echo within '+DATA_MI+U(' mi'),condLine(),true)};
+    }
+  }
+  // no gate — routine conditions card at the bottom (neutral / yellow-if-stale)
+  if(!WX) return {pin:false, card: wxState==='stale'   // no conditions loaded yet
+    ? mkCard('alert','🌡️','WEATHER','feed unreachable','retrying every 5 s',true)
+    : mkCard('','🌡️','WEATHER','ACQUIRING FORECAST…','',false)};
+  const [emoji,desc]=WMO[WX.code]||['🌡️','—'];
+  const t=rnd(WX.tempF), f=rnd(WX.feelsF), w=rnd(WX.windMph), hi=rnd(WX.hiF), lo=rnd(WX.loF);
+  const l1=(t!=null?t+'°':'—')+' · '+desc.toUpperCase();
+  const wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
+  const l2='WIND '+wd+(w!=null?w+U(' mph'):'—')+(f!=null?' · FEELS '+f+'°':'');
+  const l3=(hi!=null?'HIGH '+hi+'°':'')+(hi!=null&&lo!=null?' · ':'')+(lo!=null?'LOW '+lo+'°':'');
+  if(wxState==='stale') return {pin:false, card:mkCard('alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE',true)};
+  return {pin:false, card:mkCard('',emoji,l1,l2,l3,false)};
+}
+/* =====================================================================
+   5. LOCATION — GPS ONLY (no IP fallback)
+   watchPosition() streams fixes. The FIRST commits after a short settle window (or at
+   once if a ping is accurate enough); later fixes update the position — smoothed while
+   you're stationary, snapped on a real move. Moving far enough refetches the nearby
+   feeds for your new area. If permission is denied or unavailable, geolocationDenied is
+   set and the SITREP shows a permanent red LOCATION card. Position never leaves the
+   browser except as anonymous lat/lon query params to the keyless data feeds.
+   ===================================================================== */
+let sitrepTimer=null;
+
+// --- fix pipeline tuning ---
+const FIRST_FIX_SETTLE_MS=3000;   // collect pings this long, then commit the most accurate
+const GOOD_ACCURACY_M=65;         // a ping at least this accurate commits immediately
+const ACC_WARN_M=50;              // GPS accuracy worse than this (m ≈ 164 ft) → yellow GPS card + hazard (promoted to alert section)
+const POSITION_SMOOTHING=0.25;    // low-pass factor for stationary jitter (0 frozen … 1 raw)
+const REAL_MOVE_KM=0.05;          // a fix farther than this from the smoothed point = a real move → snap
+const REFETCH_MOVE_KM=0.5;        // moving this far refetches nearby aircraft/airspace for the new area
+
+let firstFixCommitted=false, bestFirstPing=null, bestAccuracyM=Infinity;
+let smoothedLat=null, smoothedLon=null;
+let geolocationDenied=false, geoWatchId=null;
+let lastFetchLat=null, lastFetchLon=null;
+
+function commitFirstFix(){
+  if(firstFixCommitted||!bestFirstPing) return;
+  firstFixCommitted=true;
+  smoothedLat=bestFirstPing.lat; smoothedLon=bestFirstPing.lon;
+  setUserFix(bestFirstPing.lat,bestFirstPing.lon,bestFirstPing.acc);
+}
+function onGeoPing(lat,lon,acc){
+  const a=acc==null?9999:acc;
+  if(a<bestAccuracyM) bestAccuracyM=a;
+  if(!firstFixCommitted){
+    // the first ping arms the settle timer; every ping competes on accuracy; a sharp
+    // enough ping commits at once (the timer only bites if none does)
+    if(!bestFirstPing) setTimeout(commitFirstFix,FIRST_FIX_SETTLE_MS);
+    if(!bestFirstPing || a<=bestFirstPing.acc) bestFirstPing={lat,lon,acc:a};
+    if(a<=GOOD_ACCURACY_M) commitFirstFix();
+    return;
+  }
+  if(a>Math.max(150,bestAccuracyM*3)) return;   // junk vs what this device can do → drop
+  if(smoothedLat==null || havKm(smoothedLat,smoothedLon,lat,lon)>REAL_MOVE_KM){
+    smoothedLat=lat; smoothedLon=lon;                                   // real move → snap
+  } else {
+    smoothedLat+=POSITION_SMOOTHING*(lat-smoothedLat);                  // stationary jitter → smooth
+    smoothedLon+=POSITION_SMOOTHING*(lon-smoothedLon);
+  }
+  setUserFix(smoothedLat,smoothedLon,a);
+}
+function startGpsWatch(){
+  if(geoWatchId!=null) return;
+  if(!navigator.geolocation){ geolocationDenied=true; sitrepTick(); return; }
+  try{
+    geoWatchId=navigator.geolocation.watchPosition(
+      pos=>onGeoPing(pos.coords.latitude,pos.coords.longitude,pos.coords.accuracy),
+      err=>{ if(err&&err.code===1){ geolocationDenied=true; sitrepTick(); } },   // PERMISSION_DENIED
+      {enableHighAccuracy:true,timeout:10000,maximumAge:5000});
+  }catch(e){ geolocationDenied=true; sitrepTick(); }
+}
+function locate(){ startGpsWatch(); }
+
+// Refetch the position-scoped feeds (aircraft/airspace/NPS) + the chart when you've
+// moved far enough that the old 25 mi query no longer covers you well.
+function refetchNearbyFeeds(){
+  lastFetchLat=USER.lat; lastFetchLon=USER.lon;
+  LAYERS.forEach(cfg=>{ if(cfg.viewport){ const st=LAYER_STATE[cfg.id];
+    if(st&&st.started&&!st.loading) runLayer(cfg); } });
+  flyRefresh();
+}
+// Adopt a committed GPS fix. The first fix kicks every feed around you; a later fix only
+// refetches if you've genuinely moved. Always repaints the SITREP.
+function setUserFix(lat,lon,acc){
+  const first=USER.lat==null;
+  USER.lat=lat; USER.lon=lon; USER.src='gps'; USER.ts=Date.now();
+  if(acc!=null) USER.acc=acc;
+  if(first){ refetchNearbyFeeds(); loadWeather(true); }
+  else if(lastFetchLat==null || havKm(lastFetchLat,lastFetchLon,lat,lon)>=REFETCH_MOVE_KM){
+    refetchNearbyFeeds();
+  }
+  sitrepTick();
+}
+
+
+// concise text, no "…" (CSS clips)
+const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));
+
+// -- CATEGORY MODEL --------------------------------------------------------
+// Each in-view feature becomes ONE SITREP card; a cfg maps a feed to a card shape
+// (distance/direction added by the SITREP code):
+//   cls(f) → '' / 'alert' (yellow) / 'danger' (red)   hazard : drives the title colour
+//   head : line 1     sub : line 2     detail : appended to line 3 after the distance
+// readsb reports alt_baro:'ground' for taxiing aircraft — show as a word, not "ground ft"
+const ALT=f=>{const a=f.properties.alt;
+  return a==='ground'?'on ground':a!=null&&a!=='?'?a+U(' ft'):'—';};
+// aircraft line-2 cascade that never shows '?', blank or a repeat of line 1:
+// description → ICAO type → operator → tail reg (if different) → generic by kind
+const acSub=f=>{const p=f.properties;
+  const type=p.type&&p.type!=='?'?p.type:'';
+  const tail=String(p.flight||p.hex||'').trim().toUpperCase();
+  const reg=p.reg&&p.reg.toUpperCase()!==tail?p.reg:'';
+  const generic=p.mil?'military aircraft':(p.heli?'helicopter':'aircraft');
+  return escapeHtml(p.desc||type||p.op||reg||generic);};
+// aircraft card icon — ✈️ / 🚁 for every aircraft. All aircraft share ONE identity colour
+// (white); the tail number on a card is tinted with it.
+const AIRCRAFT_COLOR='#eaf1f8';
+const acIcon=f=>f.properties.heli?'🚁':'✈️';
+// tail-number label (callsign → hex → `fb`), clipped
+const acTail=(f,n,fb)=>cut(f.properties.flight||f.properties.hex||fb||'?',n);
+// stable identity for a contact — dedupe across feeds, breach bookkeeping
+const acKey=p=>p.hex||p.flight||'';
+const CATS=[
+  {src:'nws', hazard:true, icon:'⚠️',
+   cls:f=>/Extreme|Severe/i.test(f.properties.severity)?'danger':'alert',
+   head:f=>cut((f.properties.event||'warning').replace(/\s*warning$/i,'').toUpperCase(),22),
+   sub:f=>cut(f.properties.area,26),
+   // line 3 = when the warning ends (severity is already in the headline + colour)
+   detail:f=>{const e=f.properties.ends,d=e&&new Date(e);
+     return d&&!isNaN(d)?'til '+d.toLocaleTimeString([],Object.assign({hour:'numeric',minute:'2-digit'},tzOpt())):'';}},
+  {src:'nearair', hazard:false, air:true, icon:acIcon, cls:()=>'',
+   head:f=>acTail(f,12),
+   sub:acSub, detail:ALT},
+  {src:'mil', hazard:false, air:true, icon:acIcon, cls:()=>'alert',
+   head:f=>acTail(f,10),
+   sub:acSub, detail:ALT},
+  // FAA airspace restrictions that gate a drone — HARD no-fly (red: defense/prohibited/
+  // security) or CONDITIONAL (yellow: restricted/stadium, only when active). hazard:true.
+  {src:'airspace', hazard:true, filter:f=>f.properties.sev==='hard'||f.properties.sev==='caution',
+   // class glyph: 🛡️ defense · 🔒 security · ⛔ prohibited · 🏟️ stadium · ⚠️ restricted
+   icon:f=>({DEF:'🛡️',NSUFR:'🔒',P:'⛔',STDM:'🏟️',R:'⚠️'}[f.properties.cls]
+     ||(f.properties.sev==='hard'?'⛔':'⚠️')),
+   cls:f=>f.properties.sev==='hard'?'danger':'alert',
+   head:f=>({DEF:'DEFENSE AIRSPACE',NSUFR:'SECURITY NO-FLY',P:'PROHIBITED AREA',R:'RESTRICTED AREA',
+     STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
+   sub:f=>cut(f.properties.name||'—',26),
+   detail:f=>f.properties.sev==='hard'?'drones prohibited'
+     :f.properties.cls==='STDM'?'no-fly during events':'no-fly if active'},
+  // ADVISORY special-use airspace (MOA/Warning/Alert/Danger): does NOT restrict a
+  // ≤400 ft drone — activity to be aware of, not a no-fly. hazard:false.
+  {src:'airspace', hazard:false, filter:f=>f.properties.sev==='advisory', icon:'🎯', cls:()=>'',
+   head:f=>({MOA:'MILITARY OPS AREA',W:'WARNING AREA',A:'ALERT AREA',D:'DANGER AREA'}[f.properties.cls]||'SPECIAL-USE AIRSPACE'),
+   sub:f=>cut(f.properties.name||'—',26), detail:()=>'advisory only'},
+  // Controlled airspace (Class B/C/D + surface E) — the AUTHORIZATION case: fly with
+  // LAANC up to the grid ceiling, so the actual no-fly severity is carried by the FAA
+  // CEILING card. hazard:false; cls 'alert' is a fallback tint if _col is missing.
+  {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl', icon:'🗼', cls:()=>'alert',
+   head:f=>({B:'CLASS B AIRSPACE',C:'CLASS C AIRSPACE',D:'CLASS D AIRSPACE',E:'CLASS E AIRSPACE'}[f.properties.cls]||'AIRSPACE'),
+   sub:f=>cut(f.properties.name||'—',26),
+   detail:()=>'authorization (LAANC)'},
+  // National Park Service lands — a drone no-fly (can't launch / land / operate).
+  {src:'nps', hazard:true, icon:'🏞️', cls:()=>'danger',
+   head:f=>cut(f.properties.name||'NPS LAND',20),
+   sub:()=>'drones prohibited', detail:f=>cut(f.properties.utype||'NPS unit',18)},
+];
+// features of a category within rKm of the GPS position — a point by its radius, a
+// polygon when the GPS position is inside it OR its nearest edge falls within the radius
+function catItems(cfg,lat,lon,rKm){
+  let items=featsIn(cfg.src); if(cfg.filter) items=items.filter(cfg.filter);
+  return items.filter(f=>{
+    const g=f.geometry; if(!g) return false;
+    if(g.type==='Point') return havKm(lat,lon,g.coordinates[1],g.coordinates[0])<=rKm;
+    if(pointInFeature(f,lon,lat)) return true;
+    const ne=nearestEdge(f,lon,lat);
+    return !!ne&&ne.km<=rKm;
+  });
+}
+// planes within rKm with a usable numeric altitude, deduped by hex across the three
+// feeds — ONE shared collector so the LOW AIRCRAFT card and the chart's TRFC cells agree
+function planesNear(lat,lon,rKm){
+  const out=[], seen=new Set();
+  ['sos','nearair','mil'].forEach(id=>featsIn(id).forEach(f=>{
+    const p=f.properties;
+    const alt=+p.alt; if(!isFinite(alt)) return;   // 'ground'/'?' → not airborne data
+    const g=f.geometry&&f.geometry.coordinates; if(!g) return;
+    const km=havKm(lat,lon,g[1],g[0]); if(km>rKm) return;
+    const hx=acKey(p);
+    if(hx){ if(seen.has(hx)) return; seen.add(hx); }
+    out.push({f,km,alt,pt:g});
+  }));
+  return out;
+}
+// best-estimate MSL altitude [ft]: ADS-B barometric alt is PRESSURE altitude (~27.3
+// ft/hPa off true MSL), QNH-corrected when known; else the raw value
+const FT_PER_HPA=27.3, ISA_MSL_HPA=1013.25;
+function planeMslFt(a){
+  const baro=a.f.properties.altBaro;
+  if(baro!=null && QNH_HPA!=null) return baro+(QNH_HPA-ISA_MSL_HPA)*FT_PER_HPA;
+  return a.alt;
+}
+// ground elevation for a plane's AGL: terrain under the plane, else the GPS position cell, else null
+function planeGroundFt(a,crossGround){
+  const g=groundElevFt(a.pt[1],a.pt[0]);
+  return g!=null?g:crossGround;
+}
+// {ground, agl}; ground null → AGL is raw MSL (fails toward NOT flagging over unknown terrain)
+function planeAglFt(a,crossGround){
+  const ground=planeGroundFt(a,crossGround);
+  return {ground, agl: ground==null?planeMslFt(a):planeMslFt(a)-ground};
+}
+// only plausibly-low planes need a terrain lookup — a FL350 cruiser can't breach 1,000 ft AGL
+const AGL_CAND_MAX_FT=16000;
+
+function sitrepTick(){
+  // SITREP reflects what's within the OPERATIONAL RANGE (RED_MI) around your GPS position;
+  // fully synchronous — reads only already-loaded state.
+  const rangeKm=RED_MI*MI_TO_KM;
+  // aircraft are tracked further out (the 5 mi GREY bubble) so you see traffic approaching:
+  // low in the grey bubble → yellow heads-up; low inside the 1 mi red ring → red warning.
+  const warnKm=GREY_MI*MI_TO_KM;
+  // no GPS fix yet → red verdict + GPS locating card (no empty "acquiring" screen)
+  if(USER.lat==null){
+    verdictSeverity=2; renderClock();
+    const rows=[];
+    const row=c=>rows.push(
+      `<div class="sit-row${c.cls?' '+c.cls:''}"><span class="ic">${c.ic}</span>`+
+      `<span class="tx"><span class="s1">${c.l1||''}</span><span class="s2">${c.l2||''}</span><span class="s3">${c.l3||''}</span></span></div>`);
+    if(geolocationDenied){
+      row(mkCard('danger','📍','LOCATION REQUIRED','enable GPS and reload','permission denied',true));
+    }else{
+      row(mkCard('danger','📍','GPS LOCK','locating…','waiting for fix',true));
+    }
+    $('#sit-body').innerHTML=rows.join('');
+    return;
+  }
+  const lat=USER.lat, lon=USER.lon;
+  const rows=[];
+  // render one card record → a 3-line info row. col: an explicit headline hex (airspace
+  // polygon colour / aircraft identity colour), sanitised upstream.
+  const row=c=>rows.push(
+    `<div class="sit-row${c.cls?' '+c.cls:''}"><span class="ic">${c.ic}</span>`+
+    `<span class="tx"><span class="s1"${c.col?` style="color:${c.col}"`:''}>${c.l1||''}</span><span class="s2">${c.l2||''}</span><span class="s3">${c.l3||''}</span></span></div>`);
+  // Distance + direction are measured from your GPS position.
+  const dirMi=(la,lo)=>compass(bearing(lat,lon,la,lo))+' '+fmtMi(havKm(lat,lon,la,lo));
+
+  const cards=[];   // array of mkCard() records
+
+  // -- LOW AIRCRAFT (two tiers, NO flash): a plane below WARN_AGL_FT (the 400 ft ceiling +
+  //    500 ft separation). WHERE it is sets the tier: inside the 1 mi RED range ring → a
+  //    RED WARNING; out in the 5 mi GREY bubble → a YELLOW heads-up. The plane's OWN card
+  //    (below) transforms into the alert while it's low and reverts on climb-out, so there is
+  //    always exactly ONE card per plane. planesNear() is the same deduped collector that
+  //    feeds the chart's TRFC cells, so card and chart always agree. AGL = QNH-corrected MSL
+  //    altitude − ground elevation UNDER THE PLANE (cached, keyless Open-Meteo). --
+  const acGround=groundElevFt(lat,lon);          // ft AMSL at your position, null until fetched
+  const near=planesNear(lat,lon,warnKm);
+  // pull terrain under your position + every plausibly-low plane in one batch
+  ensureGroundElev([[lat,lon],...near.filter(a=>a.alt<AGL_CAND_MAX_FT).map(a=>[a.pt[1],a.pt[0]])]);
+  const lowAc=near
+    .map(a=>{ const {ground,agl}=planeAglFt(a,acGround); return {...a,ground,agl}; })
+    .filter(a=>a.agl<WARN_AGL_FT);
+  const breachInfo=new Map();   // acKey → {label:'254 ft AGL', inRange:bool}
+  lowAc.forEach(a=>{
+    const inRange=havKm(lat,lon,a.pt[1],a.pt[0])<=rangeKm;   // inside the 1 mi red ring?
+    breachInfo.set(acKey(a.f.properties),{
+      label:Math.max(0,Math.round(a.agl))+U(' ft')+(a.ground==null?'':' AGL'),
+      inRange});
+  });
+
+  // -- FAA CEILING (pinned): surfaces the chart's own airspace gate — reads the SAME
+  //    aspCapFt the chart's FAA column reads (LAANC grid + defense TFRs), so they can't
+  //    disagree: red no-fly when it grounds, yellow when it caps < 400 ft. Unknown → no card. --
+  const faaCap=(FLY.detail&&!FLY.detail.aspUnknown)?FLY.detail.aspCapFt:null;
+  if(faaCap!=null && faaCap<SPEC.regFt){
+    const rangeTxt='within '+RNG.mi.toFixed(1)+U(' mi');
+    if(faaCap<0) cards.push(mkCard('danger','⛔','FAA NO-FLY','LAANC grid · 0 ft ceiling',
+      rangeTxt,true));
+    else cards.push(mkCard('alert','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',
+      rangeTxt,true));
+  }
+
+  // the weather card (below) folds every weather gate into itself — one feed, one card
+  const wn=FLY.detail&&FLY.detail.wxNow;
+
+  // -- SPACE WEATHER (pinned): a Kp storm degrades GPS/compass. RED grounding at
+  //    Kp ≥ kpGnd (G3+), YELLOW at Kp ≥ kpCaut (G1–G2). Reads the SAME kpNow the chart's
+  //    KP gate uses, so they can't disagree. Quiet/unknown → no card. --
+  const kpNow=FLY.detail?FLY.detail.kpNow:null;
+  if(kpNow!=null && kpNow>=SPEC.kpGnd){
+    cards.push(mkCard('danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      'GPS / compass unreliable',true));
+  }else if(kpNow!=null && kpNow>=SPEC.kpCaut){
+    cards.push(mkCard('alert','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      'GPS accuracy may be reduced',true));
+  }
+
+  // -- DATA HEALTH (pinned): every feed classified by the ONE feedTier() rule. RED "not
+  //    loaded" (never verified — startup / not yet pulled, shown at once, grounds) vs
+  //    YELLOW "unverified" (was loaded, now blipping past the grace window). Weather rides the
+  //    weather card, not this one. --
+  // weather stale = failing past grace (whether or not it ever loaded — a dead feed still
+  // escalates to WEATHER UNAVAILABLE); forcing everLoaded=true reuses the same grace rule.
+  const wxStale=feedTier(true, FLY.err.om, flyErrSince.om)==='yellow';
+  const redFeeds=[], yellowFeeds=[];
+  for(const [k,label] of [['asp','FAA airspace'],['kp','Kp'],['radar','radar']]){
+    let tier=gateTier(k);
+    // 'FAA airspace' also covers the heavier airspace feed — a failing feed keeps the card up
+    // even when the lightweight gate query is fine, so it reflects the empty listing.
+    if(k==='asp' && !tier && layerTier('airspace')==='yellow') tier='yellow';
+    if(tier==='red') redFeeds.push(label); else if(tier==='yellow') yellowFeeds.push(label);
+  }
+  // AIRCRAFT is traffic, not a flyability gate — always YELLOW (missing traffic ≠ grounded),
+  // never red. Shown until the planes are drawn (post-fix, never loaded, none pulled) or
+  // while the feed is failing. (features>0 = drawn.)
+  const acOv=LAYER_STATE.nearair;
+  const acPending=!!(acOv && acOv.started && !acOv.everLoaded && (acOv.features||[]).length===0 && USER.lat!=null);
+  if(acPending || layerTier('nearair')==='yellow') yellowFeeds.push('aircraft');
+  const dataFeeds=[...redFeeds,...yellowFeeds];
+  if(dataFeeds.length){
+    const red=redFeeds.length>0;
+    // hazard flag colours the verdict — true for a real gate problem, FALSE when the only
+    // thing pending is aircraft (traffic is informational; planes still loading ≠ caution)
+    const dataHazard=dataFeeds.some(f=>f!=='aircraft');
+    cards.push(mkCard(red?'danger':'alert','📡', red?'DATA NOT LOADED':'DATA UNVERIFIED',
+      cut(dataFeeds.join(' · '),30), red?'acquiring — verify before flying':'retrying every 5 s', dataHazard));
+  }
+  // weather-feed health: down = never loaded (red), stale = last-good shows (yellow)
+  const wxState=wxStale?(FLY.data?'stale':'down'):'ok';
+  // a limiting weather gate (or a down feed) pins here; a routine card sinks to the bottom
+  const wxc=wxCard(wxState, wn);
+  if(wxc.pin) cards.push(wxc.card);
+
+  // -- GENERAL context cards (area-wide) — appended at the BOTTOM, background context --
+  const general=[];
+  // SPC Day-1 outlook: are you under a severe/tornado risk today? Just an
+  // OUTLOOK, so an info card (no colour) above the weather card.
+  const spcCards=[];
+  const spcF=featsIn('spc');
+  if(spcF.length){
+    const tornHit=spcF.filter(f=>f.properties.kind==='torn'&&pointInFeature(f,lon,lat))
+      .sort((a,b)=>(parseFloat(b.properties.code)||0)-(parseFloat(a.properties.code)||0))[0];
+    const catHit=spcF.filter(f=>f.properties.kind==='cat'&&f.properties.rank>=1&&pointInFeature(f,lon,lat))
+      .sort((a,b)=>b.properties.rank-a.properties.rank)[0];
+    if(tornHit) spcCards.push(mkCard('','🌪️','TORNADO OUTLOOK',cut(tornHit.properties.label,16)+' today',
+      tornHit.properties.sig?'significant EF2+ risk':'SPC Day 1 outlook',false));
+    if(catHit) spcCards.push(mkCard('','⛈️','SEVERE WX OUTLOOK',cut(catHit.properties.label,16)+' today',
+      'tornado / hail / wind risk',false));
+  }
+  // solar flare: an M/X GOES X-ray flare risks an HF radio blackout — a context card,
+  // not a chart gate (the Kp storm above is the one that grounds)
+  if(XRAY&&/^[MX]/.test(XRAY)) general.push(mkCard(/^X/.test(XRAY)?'danger':'alert','☀️','SOLAR FLARE '+XRAY,'GOES X-ray · '+(/^X/.test(XRAY)?'major':'moderate'),
+    'HF radio blackout risk',true));
+
+  // -- INDIVIDUAL item cards: one per in-view feature, interleaved. Hazards outrank
+  //    routine traffic; tiers red → yellow → rest, distance sorts within each. Capped. --
+  const items=[];
+  CATS.forEach(cfg=>catItems(cfg,lat,lon,cfg.air?warnKm:rangeKm).forEach(f=>{
+    const g=f.geometry; if(!g) return;
+    // pt = closest edge point to your position (label + sorting); inside → "overhead"
+    const inside=g.type!=='Point'&&pointInFeature(f,lon,lat);
+    let cls=cfg.cls?cfg.cls(f):'', det=null, headOv=null, subOv=null, icOv=null, hazardOv=null;
+    // LOW AIRCRAFT: a low plane's own card BECOMES the alert (RED WARNING inside the 1 mi red
+    // ring, YELLOW in the grey bubble) and reverts on climb-out — one card per plane, never two
+    const bi=cfg.air?breachInfo.get(acKey(f.properties)):null;
+    if(bi){
+      icOv=acIcon(f); hazardOv=true; headOv='LOW AIRCRAFT';   // ✈️/🚁, same as every card
+      cls=bi.inRange?'danger':'alert';                        // red inside 1 mi · yellow in the bubble
+      subOv='<span style="color:'+AIRCRAFT_COLOR+'">'+acTail(f,12,'aircraft')+'</span>';
+      det=bi.label;
+    }
+    // effective hazard uses the per-card override (hazardOv) when set, so a low-aircraft card
+    // tiers as a hazard — surviving the cap, colouring the verdict
+    const hazard=hazardOv!=null?hazardOv:cfg.hazard;
+    const tier=hazard?(cls==='danger'?0:1):2;
+    let pt, km;
+    if(g.type==='Point'){ pt=g.coordinates; km=havKm(lat,lon,pt[1],pt[0]); }
+    else {
+      const ne=nearestEdge(f,lon,lat)||{pt:polyPt(f),km:0};
+      pt=ne.pt; km=inside?0:ne.km;
+    }
+    if(!pt) return;
+    // pt drives the label (direction/distance) + sorting = the NEAREST EDGE.
+    items.push({cfg,f,pt,cls,tier,inside,km,det,headOv,subOv,icOv,hazardOv});
+  }));
+  // a named airspace zone (esp. Class B) arrives as many shelf polygons — collapse
+  // to the nearest single card per class+name
+  const nearestAsp=new Map();
+  const aspKey=it=>(it.f.properties.cls||'')+'|'+(it.f.properties.name||'');
+  items.forEach(it=>{ if(it.cfg.src!=='airspace') return;
+    const k=aspKey(it), ex=nearestAsp.get(k); if(!ex||it.km<ex.km) nearestAsp.set(k,it); });
+  const shown=items.filter(it=>it.cfg.src!=='airspace'||nearestAsp.get(aspKey(it))===it);
+  shown.sort((a,z)=>a.tier-z.tier||a.km-z.km);
+  const ITEM_CAP=14;
+  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,km,det,headOv,subOv,icOv,hazardOv})=>{
+    const detTxt=det!=null?det:(cfg.detail?cfg.detail(f):'');
+    const ic=icOv!=null?icOv:(typeof cfg.icon==='function'?cfg.icon(f):cfg.icon);
+    const head=headOv!=null?headOv:cfg.head(f);
+    const sub=subOv!=null?subOv:((cfg.sub?cfg.sub(f):'')||'—');
+    // headline colour: airspace takes its polygon colour; a plain aircraft card tints its tail
+    // number to the aircraft identity colour; a LOW AIRCRAFT override keeps its verdict colour
+    // (tail tinted on line 2). Only a bare hex passes, so a feed can't inject markup.
+    const rawCol=(head==='LOW AIRCRAFT')?null:cfg.src==='airspace'?f.properties._col:cfg.air?AIRCRAFT_COLOR:null;
+    const col=/^#[0-9a-fA-F]{3,8}$/.test(rawCol||'')?rawCol:undefined;
+    // every plane card carries its ground speed on line 3 after the altitude (mph, omit if unknown)
+    let l3=(inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:'');
+    if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
+    const card=mkCard(cls, ic, head, sub, l3, hazardOv!=null?hazardOv:cfg.hazard, col);
+    card.km=km; cards.push(card);   // range → sorts within its category
+  });
+  general.forEach(c=>cards.push(c));   // solar-flare hazard etc. remain in the ranked stack
+  // WEATHER is the LAST category on the SITREP. wxTail renders after EVERYTHING else (even the
+  // nearby context): WX outlook first, then general weather — the very last card. A binding
+  // weather gate/outage instead PROMOTES the card (wxc.pin): it rose into the ranked cards above.
+  const wxTail=[...spcCards];            // WX outlook (SPC severe/tornado)
+  if(!wxc.pin) wxTail.push(wxc.card);    // then general weather conditions — dead last
+
+  // -- NEARBY CONTEXT: objects OUTSIDE their range (but within the 25 mi data radius) are
+  //    neutral GENERAL objects — pushed into the SAME `cards` list so they sort by RANGE together
+  //    with the in-ring general items (aircraft / airspace interleaved by distance, not by type). --
+  // "on screen" = within the fixed #3 DATA RADIUS (DATA_MI) — the same on every device,
+  // so every object within the data radius lands on the SITREP
+  const screenKm=DATA_MI*MI_TO_KM;
+  const ctx=[];
+  CATS.forEach(cfg=>{
+    const ringRad=cfg.air?warnKm:rangeKm;
+    let feats=featsIn(cfg.src); if(cfg.filter) feats=feats.filter(cfg.filter);
+    feats.forEach(f=>{
+      const g=f.geometry; if(!g) return;
+      let pt,km;
+      if(g.type==='Point'){ pt=g.coordinates; km=havKm(lat,lon,pt[1],pt[0]); }
+      else { const ne=nearestEdge(f,lon,lat); if(!ne) return;
+        pt=ne.pt; km=pointInFeature(f,lon,lat)?0:ne.km; }
+      if(km<=ringRad) return;   // already shown as an in-ring card above
+      if(km>screenKm) return;   // beyond the on-screen radius → not shown
+      ctx.push({cfg,f,pt,km});
+    });
+  });
+  // collapse airspace shelves (same class+name) to the nearest, like the in-ring set
+  const ctxKey=it=>(it.f.properties.cls||'')+'|'+(it.f.properties.name||'');
+  const ctxAsp=new Map();
+  ctx.forEach(it=>{ if(it.cfg.src!=='airspace') return; const k=ctxKey(it),ex=ctxAsp.get(k); if(!ex||it.km<ex.km) ctxAsp.set(k,it); });
+  const CTX_CAP=24;
+  ctx.filter(it=>it.cfg.src!=='airspace'||ctxAsp.get(ctxKey(it))===it)
+     .sort((a,z)=>a.km-z.km).slice(0,CTX_CAP)
+     .forEach(({cfg,f,pt,km})=>{
+       const ic=typeof cfg.icon==='function'?cfg.icon(f):cfg.icon;
+       const head=cfg.head(f);
+       const sub=(cfg.sub?cfg.sub(f):'')||'—';
+       const detTxt=cfg.detail?cfg.detail(f):'';
+       let l3=dirMi(pt[1],pt[0])+(detTxt?' · '+detTxt:'');
+       if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
+       const rawCol=cfg.src==='airspace'?f.properties._col:cfg.air?AIRCRAFT_COLOR:null;
+       const col=/^#[0-9a-fA-F]{3,8}$/.test(rawCol||'')?rawCol:undefined;
+       const cc=mkCard('', ic, head, sub, l3, false, col);   // neutral general object
+       cc.km=km; cards.push(cc);   // out-of-ring → GENERAL category, range-sorted with in-ring items
+     });
+
+  // -- PERMANENT LOCATION CARD — your live GPS fix, always shown so position status is never
+  //    ambiguous (there is no map to glance at). Pre-lock is red (above). After lock:
+  //    • good accuracy (≤ ACC_WARN_M) → neutral card at the very bottom (wxTail)
+  //    • significantly inaccurate (> ACC_WARN_M) → yellow + hazard, pushed into cards so it
+  //      appears in the yellow-alert section at the top and can raise the overall verdict.
+  const accM = USER.acc;
+  const accPoor = accM != null && accM > ACC_WARN_M;
+  const locCard = mkCard(
+    accPoor ? 'alert' : '',
+    '📍',
+    'GPS LOCK',
+    accM != null
+      ? 'accuracy ±' + Math.round(accM * 3.28084) + U(' ft') + (accPoor ? ' · poor' : '')
+      : 'locating…',
+    lat.toFixed(4) + ', ' + lon.toFixed(4),
+    accPoor
+  );
+  if (accPoor) cards.push(locCard);   // promote to yellow-alert section at top
+  else wxTail.push(locCard);          // good lock stays at the bottom
+
+  // verdict severity: 0 go (green) · 1 caution (yellow) · 2 no-go (red). Driven by the
+  // flyability NOW column FIRST — any grounding value/condition reds it, any reduced ceiling
+  // (below the 400 ft cap) OR any unverified gate input (failed airspace / Kp / radar /
+  // weather pull — unknown ≠ clear) yellows it — then raised further by any hazard card
+  // (low aircraft / severe warning / restriction) in range.
+  let titleSev=0;
+  const g0=FLY.detail&&FLY.detail.grid&&FLY.detail.grid[0];
+  if(g0) titleSev=g0.grounded?2:(g0.maxFly<SPEC.regFt?1:0);
+  // required data not yet pulled/printed → RED grounding (can't confirm ⇒ don't fly), even
+  // before the first chart render; a post-load transient blip is yellow caution (fail-open)
+  if(flyNeverVerified()) titleSev=2;
+  else if(FLY.detail&&flyUnknown().length) titleSev=Math.max(titleSev,1);
+  cards.forEach(c=>{ if(c.hazard) titleSev=Math.max(titleSev,c.cls==='danger'?2:c.cls==='alert'?1:0); });
+  // the VISIBLE verdict is the CLOCK colour (top-left of the chart: green / yellow / red);
+  // renderClock() reads verdictSeverity. Also stamp the hidden #sit-title for tests/parity.
+  verdictSeverity=titleSev;
+  renderClock();
+  { const t=$('#sit-title'); if(t){
+    t.classList.remove('warn','alert');
+    if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
+  }}
+  // CARD CATEGORIES, top → bottom: 0 red warning · 1 yellow alert · 2 general objects (every
+  // non-promoted aircraft / airspace / etc within 25 mi). A card is PROMOTED out of general
+  // only by a real hazard (hazard flag + colour) — a plain yellow plane (e.g. military) stays
+  // general. WITHIN each category cards sort by RANGE (km ascending); area-wide cards (data /
+  // FAA / Kp / solar / promoted weather — no km) head their category. WEATHER (wxTail) is the
+  // final category, rendered after all of the above.
+  const catOf=c=>(c.hazard&&c.cls==='danger')?0:(c.hazard&&c.cls==='alert')?1:2;
+  const km=c=>c.km==null?-1:c.km;   // area-wide (no location) → head of its category
+  const ordered=cards.map((c,i)=>({c,i}))
+    .sort((a,z)=>catOf(a.c)-catOf(z.c) || km(a.c)-km(z.c) || a.i-z.i)
+    .map(x=>x.c);
+  [...ordered, ...wxTail].forEach(row);
+
+  $('#sit-body').innerHTML=rows.join('');
+}
+
+
+/* =====================================================================
+   6. CAN I FLY — the drone-preflight chart (altitudes 400→SFC × NOW/+1/+2/+3h) at your
+   GPS position, riding the unified refresh pulse. Two-way integration with the SITREP: the
+   1 mi RED range is also the LOW AIRCRAFT radius — manned traffic in it under the warning
+   altitude reds the NOW cell (TRFC); a NEXRAD echo in it grounds the NOW column (PCPN),
+   from the same mosaic the precip gate samples.
+   ===================================================================== */
+const M_TO_FT=3.28084, FT_TO_M=0.3048, M_TO_SM=1/1609.34, KT_TO_MPH=1.15078, MI_TO_KM=1.60934;
+const toMph=kt=>kt==null?null:kt*KT_TO_MPH;
+const comma=n=>Number(Math.round(n)).toLocaleString('en-US');
+const fmt=(n,d=0)=>(n==null||isNaN(n))?'–':Number(n).toFixed(d);
+// FAA Part 107 / physics limits — all fixed. Kp is right-sized to a drone's GPS/compass
+// risk: NOAA flags GPS degradation only at G3 (Kp 7), so kpCaut (Kp 5) yellows and kpGnd
+// (Kp 7) grounds.
+const SPEC={kpCaut:5,kpGnd:7,visSM:3,clrFt:500,regFt:400};
+// vertical separation to keep BELOW manned traffic [ft] — 500 ft is the manned minimum
+// safe altitude over non-congested areas (§91.119(c)), the conservative buffer
+const FAA_SEP_FT=500;
+// traffic warning altitude [ft AGL] = drone ceiling + separation. A plane below this
+// fires the LOW AIRCRAFT alert AND caps the chart's NOW column — one shared number.
+const WARN_AGL_FT=SPEC.regFt+FAA_SEP_FT;   // 400 + 500 = 900
+const LIM={wind:27};   // aircraft max wind [mph] — gates surface gust + caps the wind-aloft scan
+// two FIXED radii [statute miles], both centred on your GPS position: RED = OPERATIONAL
+// RANGE (1 mi) — the FAA point query, the RED low-aircraft warning, the TRFC cap. GREY =
+// OPERATIONAL BUBBLE (5 mi) — the traffic net + the YELLOW low-aircraft heads-up + the PCPN
+// grounding.
+const RED_MI=1, GREY_MI=5;
+const RNG={mi:RED_MI};
+// #3 DATA RADIUS [mi] — a FIXED radius, centred on YOU, identical on every device: everything
+// within it is PULLED (aircraft, airspace) and carded on the SITREP, and a radar echo within
+// it yellows the weather card. Fixed (not a pixel viewport) so results never vary by screen.
+const DATA_MI=25;
+// Altitude ladder, 50 ft steps through the FAA band (matches the grid rows).
+const ALTS_UP=(()=>{const a=[];for(let f=0;f<=SPEC.regFt;f+=50)a.push(f);return a;})();
+const ALTS=[...ALTS_UP].reverse();
+const FC_HOURS=3;   // forecast columns: NOW + the next 3 hourly steps
+const KP_URL='https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json';
+// FAA ArcGIS services (official AIS, CORS-open): LAANC grid ceiling + defense no-fly zones
+const FAA_GIS='https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services';
+const gisUrl=(svc,lat,lon,rng,fields)=>`${FAA_GIS}/${svc}/FeatureServer/0/query`
+  +`?geometry=${lon.toFixed(3)},${lat.toFixed(3)}&geometryType=esriGeometryPoint&inSR=4326`
+  +`&spatialRel=esriSpatialRelIntersects&distance=${rng}&units=esriSRUnit_StatuteMile`
+  +`&outFields=${fields}&returnGeometry=false&f=json`;
+const aspUrl=(lat,lon,rng)=>gisUrl('FAA_UAS_FacilityMap_Data',lat,lon,rng,'CEILING,UNIT');
+const defUrl=(lat,lon,rng)=>gisUrl('National_Defense_Airspace_TFR_Areas',lat,lon,rng,'NAME');
+// Pressure levels scanned for cloud decks; lowest level ≥12% cover = the base.
+const PRES_LEVELS=[1000,975,950,925,900,850,800,700];
+const CLOUD_FEW_PCT=12;
+function aloftUrl(lat,lon){
+  const h=['wind_speed_10m','wind_speed_80m','wind_speed_120m','wind_speed_180m','wind_gusts_10m','visibility',
+    'cloud_cover_low','temperature_2m','dew_point_2m']
+    .concat(PRES_LEVELS.map(p=>`geopotential_height_${p}hPa`))
+    .concat(PRES_LEVELS.map(p=>`cloud_cover_${p}hPa`));
+  const cur=['wind_speed_10m','wind_gusts_10m','cloud_cover_low',
+    'visibility','temperature_2m','dew_point_2m','pressure_msl']
+    .concat(PRES_LEVELS.map(p=>`cloud_cover_${p}hPa`));
+  return `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}`
+    +`&current=${cur.join(',')}`
+    +`&hourly=${h.join(',')}`
+    +`&wind_speed_unit=kn&forecast_days=2&timezone=auto`;
+}
+// retry a flaky fetch before letting it fail — a transient blip is usually gone next attempt
+async function retry(fn,tries=3,baseMs=600){
+  let err;
+  for(let a=0;a<tries;a++){
+    try{ return await fn(); }
+    catch(e){ err=e; if(a<tries-1) await new Promise(r=>setTimeout(r,baseMs*(a+1))); }
+  }
+  throw err;
+}
+// Open-Meteo: surface + winds aloft (height levels through the FAA band), gusts,
+// visibility, per-level cloud cover/height. One row per grid column.
+async function getAloft(lat,lon){
+  const d=await getJSON(aloftUrl(lat,lon),{timeout:10000});
+  let i=0;
+  if(d.current?.time&&d.hourly?.time){const now=d.current.time.slice(0,13);i=d.hourly.time.findIndex(t=>t.slice(0,13)===now);if(i<0)i=0;}
+  const H=d.hourly||{}, elev=d.elevation??0;
+  const gh=H.wind_gusts_10m||[];
+  const cur=d.current||{};
+  // stash local sea-level pressure (≈ QNH) for the aircraft-AGL baro correction
+  if(typeof cur.pressure_msl==='number'&&isFinite(cur.pressure_msl)) QNH_HPA=cur.pressure_msl;
+  const cloudBaseAt=n=>{
+    const idx=i+n, C=k=>n===0?(cur[k]??H[k]?.[idx]):H[k]?.[idx];
+    let deckFt=null;
+    for(const p of PRES_LEVELS){
+      const cc=C(`cloud_cover_${p}hPa`), ghm=H[`geopotential_height_${p}hPa`]?.[idx]??H[`geopotential_height_${p}hPa`]?.[i];
+      if(cc==null||ghm==null) continue;
+      const agl=(ghm-elev)*M_TO_FT; if(agl<=0) continue;
+      if(cc>=CLOUD_FEW_PCT){ deckFt=agl; break; }
+    }
+    const low=C('cloud_cover_low'), T=C('temperature_2m'), Td=C('dew_point_2m');
+    const lclFt=((low??0)>=CLOUD_FEW_PCT && T!=null && Td!=null)?Math.max(0,Math.round((T-Td)*410)):null;
+    let baseFt=null; for(const v of [deckFt,lclFt]) if(v!=null) baseFt=(baseFt==null?v:Math.min(baseFt,v));
+    return baseFt;
+  };
+  const profAt=n=>{const idx=i+n;
+    const w10=n===0?(d.current?.wind_speed_10m??H.wind_speed_10m?.[idx]):H.wind_speed_10m?.[idx];
+    return [{h:10,w:w10},{h:80,w:H.wind_speed_80m?.[idx]},{h:120,w:H.wind_speed_120m?.[idx]},{h:180,w:H.wind_speed_180m?.[idx]}]
+      .filter(x=>x.w!=null&&!isNaN(x.w)).sort((a,b)=>a.h-b.h);};
+  const gustAt =n=>n===0?(d.current?.wind_gusts_10m??gh[i]):gh[i+n];
+  const visAt  =n=>n===0?(cur.visibility??H.visibility?.[i]):H.visibility?.[i+n];
+  const cols=[];
+  for(let n=0;n<=FC_HOURS;n++){
+    cols.push({n, windPts:profAt(n), gustKt:gustAt(n), baseFt:cloudBaseAt(n), visM:visAt(n)});
+  }
+  return {cols};
+}
+// NOAA SWPC planetary-Kp forecast: the full time-sorted bin list, so each grid hour
+// picks the value in force when it arrives (3-hourly bins).
+async function getKp(){
+  const d=await getJSON(KP_URL,{timeout:7000});
+  if(!Array.isArray(d)||d.length===0) return null;
+  const arrHdr=Array.isArray(d[0]);       // products feed = array rows w/ header
+  const src=arrHdr?d.slice(1):d;
+  const rows=src.map(r=>{
+    const t=arrHdr?r[0]:r.time_tag, kp=Number(arrHdr?r[1]:r.kp);
+    // observed = finalized · estimated = nowcast · predicted = forecast; NOW uses the last observed
+    const obs=arrHdr?r[2]:r.observed;
+    return {ms:Date.parse((t||'').replace(' ','T')+'Z'), kp, obs};
+  }).filter(x=>!isNaN(x.ms)&&!isNaN(x.kp)).sort((a,b)=>a.ms-b.ms);
+  return rows.length?{rows}:null;
+}
+// FAA airspace within `rng` mi: worst LAANC grid ceiling; a defense zone in
+// range forces 0 (no-fly). A LEGAL warning, so anything that could quietly
+// understate a restriction THROWS (→ yellow via fail-open), never reads "clear".
+async function getAirspace(lat,lon,rng){
+  const [grid,def]=await Promise.all([ getJSON(aspUrl(lat,lon,rng),{timeout:7000}), getJSON(defUrl(lat,lon,rng),{timeout:7000}) ]);
+  if(grid.error||!Array.isArray(grid.features)) throw new Error('airspace grid query failed');
+  if(def.error ||!Array.isArray(def.features))  throw new Error('defense-airspace query failed');
+  if(grid.exceededTransferLimit||def.exceededTransferLimit) throw new Error('airspace result truncated');
+  let ceil=SPEC.regFt;
+  for(const f of grid.features){
+    const a=f&&f.attributes;
+    const c=(a&&typeof a.CEILING==='number')?a.CEILING:NaN;
+    if(!Number.isFinite(c)||c<0||c>10000) throw new Error('airspace cell has no usable ceiling');
+    if(a.UNIT!=null&&!/^f/i.test(String(a.UNIT))) throw new Error('airspace ceiling in unexpected units');
+    ceil=Math.min(ceil,c);
+  }
+  if(def.features.length>0) ceil=0;
+  return {ceilFt:ceil};
+}
+// wind(ft) → knots, linearly interpolating the sparse model levels
+function makeProfile(pts){
+  const p=(pts||[]).filter(x=>x&&x.w!=null&&!isNaN(x.w)).sort((a,b)=>a.h-b.h);
+  return function(ft){
+    if(p.length===0) return null;
+    const m=ft*FT_TO_M;
+    if(m<=p[0].h) return p[0].w;
+    if(m>=p[p.length-1].h) return p[p.length-1].w;
+    for(let i=0;i<p.length-1;i++){if(m>=p[i].h&&m<=p[i+1].h){const t=(m-p[i].h)/(p[i+1].h-p[i].h);return p[i].w+t*(p[i+1].w-p[i].w);}}
+    return p[p.length-1].w;
+  };
+}
+// Airspace cache — LAANC is near-static + the FAA service is rate-limited, so re-query
+// only on a real location/range change or TTL expiry. Persisted so reloads reuse it.
+const ASP_CACHE_KEY='canifly.asp';
+const ASP_TTL=6*60*60*1000, ASP_HARD_TTL=24*60*60*1000;
+const ASP_TOL_KM=0.15;   // GPS/GPS position jitter tolerance — small next to the ≥0.5 mi radius
+let aspCache=null;
+function hydrateAsp(){
+  try{ const s=JSON.parse(localStorage.getItem(ASP_CACHE_KEY)||'null');
+    if(s&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&Number.isFinite(s.rng)
+       &&Number.isFinite(s.ceilFt)&&s.ceilFt>=0&&s.ceilFt<=SPEC.regFt
+       &&Number.isFinite(s.ts)&&(Date.now()-s.ts)<ASP_HARD_TTL){ aspCache=s; } }catch(e){}
+}
+function persistAsp(){ store(ASP_CACHE_KEY,JSON.stringify(aspCache)); }
+
+// ---- PCPN: NEXRAD reflectivity within `rngMi` of the point? Samples the same Iowa
+// Mesonet mosaic, at native z8, on an offscreen canvas. Called twice per
+// refresh — GREY ring (5 mi, grounds NOW) and DATA_MI (the yellow "nearby"). Returns
+// true/false, or null when tiles can't be read (fails OPEN, yellows via FLY.err). ----
+const RADAR_Z=8, RADAR_ALPHA=80, RADAR_MIN_PX=2;
+const radarMemo=new Map();   // key → val: identical minute+point+range reuses the scan.
+const RADAR_MEMO_MAX=8;      // small LRU so the grey-ring + screen samples don't evict each other
+async function sampleRadarPrecip(lat,lon,rngMi){
+  const n=1<<RADAR_Z, d=Math.PI/180;
+  const xf=(lon+180)/360*n;
+  const yf=(1-Math.log(Math.tan(lat*d)+1/Math.cos(lat*d))/Math.PI)/2*n;
+  if(!isFinite(yf)||yf<0||yf>=n) return false;         // poles — no NEXRAD there anyway
+  const mPerPx=40075016.686*Math.cos(lat*d)/(n*256);   // metres per mosaic pixel at this lat
+  const rPx=Math.max(1,rngMi*MI_TO_KM*1000/mPerPx);
+  const cx=xf*256, cy=yf*256;                          // global pixel coords at z8
+  const tx0=Math.floor((cx-rPx)/256), tx1=Math.floor((cx+rPx)/256);
+  const ty0=Math.max(0,Math.floor((cy-rPx)/256)), ty1=Math.min(n-1,Math.floor((cy+rPx)/256));
+  // cache key = the current refresh window; re-sampling within a window reuses the
+  // memoised verdict (and shares the browser tile cache across the two range samples)
+  const bust=currentRadarBust();
+  const key=bust+'|'+lat.toFixed(3)+'|'+lon.toFixed(3)+'|'+rngMi;
+  if(radarMemo.has(key)) return radarMemo.get(key);
+  const tiles=[];
+  for(let tx=tx0;tx<=tx1;tx++)for(let ty=ty0;ty<=ty1;ty++)
+    tiles.push({x:((tx%n)+n)%n,y:ty,px:(tx-tx0)*256,py:(ty-ty0)*256});
+  const imgs=await Promise.all(tiles.map(t=>new Promise((res,rej)=>{
+    const im=new Image(); im.crossOrigin='anonymous';
+    im.onload=()=>res({t,im}); im.onerror=()=>rej(new Error('radar tile failed'));
+    im.src=RADAR_TILE_URL.replace('{z}',RADAR_Z).replace('{x}',t.x).replace('{y}',t.y)+'?'+bust;
+  })));
+  const w=(tx1-tx0+1)*256, h=(ty1-ty0+1)*256;
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  const ctx=cv.getContext('2d',{willReadFrequently:true});
+  imgs.forEach(({t,im})=>ctx.drawImage(im,t.px,t.py));
+  const px=ctx.getImageData(0,0,w,h).data;   // throws on a tainted canvas → caller catches → null
+  const ox=cx-tx0*256, oy=cy-ty0*256;
+  const x0=Math.max(0,Math.floor(ox-rPx)), x1=Math.min(w-1,Math.ceil(ox+rPx));
+  const y0=Math.max(0,Math.floor(oy-rPx)), y1=Math.min(h-1,Math.ceil(oy+rPx));
+  let hits=0, found=false;
+  for(let y=y0;y<=y1&&!found;y++)for(let x=x0;x<=x1;x++){
+    const dx=x-ox, dy=y-oy; if(dx*dx+dy*dy>rPx*rPx) continue;
+    if(px[(y*w+x)*4+3]>=RADAR_ALPHA && ++hits>=RADAR_MIN_PX){ found=true; break; }   // ≥2 px kills speckle
+  }
+  radarMemo.set(key,found);
+  if(radarMemo.size>RADAR_MEMO_MAX) radarMemo.delete(radarMemo.keys().next().value);   // evict oldest
+  return found;
+}
+
+// ---- TRFC: traffic-imposed NOW-column ceiling [ft]. A plane at AGL A pins the highest
+// usable band to the highest 50-ft step strictly below (A − FAA_SEP_FT); the most
+// restrictive plane wins (Infinity = none, < 0 grounds). Scans only the 1 mi range —
+// grey-ring aircraft are tracked as cards but don't cap the chart until in range.
+function flyTrafficCeilFt(){
+  const c={lat:USER.lat,lng:USER.lon};
+  const cross=groundElevFt(c.lat,c.lng);   // ft AMSL at your position, fallback ground
+  const near=planesNear(c.lat,c.lng,RNG.mi*MI_TO_KM);
+  ensureGroundElev([[c.lat,c.lng],...near.filter(a=>a.alt<AGL_CAND_MAX_FT).map(a=>[a.pt[1],a.pt[0]])]);
+  let ceil=Infinity;
+  near.forEach(a=>{
+    const {agl}=planeAglFt(a,cross);   // per-plane terrain, QNH-corrected MSL
+    if(agl>=WARN_AGL_FT) return;       // too high to intrude on the 0–400 band
+    const safeFloor=agl-FAA_SEP_FT;    // drone must stay clear of (below) this
+    // highest 50-ft band STRICTLY below the sep floor (−50 = none → grounds)
+    let top=-50; for(const ft of ALTS){ if(ft<safeFloor){ top=ft; break; } }
+    if(top<ceil) ceil=top;
+  });
+  return ceil;
+}
+
+// ---- state + render pipeline ----
+const FLY={
+  data:null,     // last good {lat,lon,aloft,kp,asp} — lat/lon = where it was fetched
+  detail:null,   // computed render model (kept for tests/debug)
+  precip:null,   // radar echo within the GREY ring (5 mi)? true/false/null → grounds NOW
+  precipInbound:null,   // radar echo within the #3 data radius (DATA_MI) but NOT the 5 mi ring → yellow "nearby"
+  // Every gate starts UNVERIFIED (true), not clear — so the app never opens falsely-green.
+  // Each clears as its feed pulls + prints; while a gate has NEVER loaded the verdict
+  // GROUNDS RED (can't confirm → don't fly) and a red DATA card names it, immediately (no
+  // grace). Once a feed has loaded once, a later blip reverts to yellow caution (fail-open).
+  err:{om:true,kp:true,asp:true,radar:true},
+};
+// ---- UNIFIED DATA FRESHNESS ----
+// ONE classifier for every data source (chart gates AND airspace/NPS feeds). Given whether it has
+// EVER loaded, whether it's failing NOW, and since when → its DATA-card tier:
+//   'red'   = never pulled yet (startup / not yet loaded) — shown at once, grounds the verdict
+//   'yellow' = was loaded, now failing past the grace window — caution (fail-open)
+//   null    = healthy, or a failure still inside the grace window
+const DATA_ERR_GRACE_MS=35000;   // ~35 s: a self-healing blip won't pop the DATA card
+function feedTier(everLoaded, failing, since){
+  if(!failing) return null;
+  if(!everLoaded) return 'red';
+  return since>0 && Date.now()-since>=DATA_ERR_GRACE_MS ? 'yellow' : null;   // 0 = not yet stamped → within grace
+}
+// per chart gate: FLY.err = failing now · flyEver = ever loaded · flyErrSince = when it began
+// failing. All three maintained together in flyRefresh.
+const flyEver={om:false,asp:false,kp:false,radar:false};
+const flyErrSince={om:0,asp:0,kp:0,radar:0};
+const FLY_ERR_LABEL={om:'weather',asp:'FAA airspace',kp:'Kp',radar:'radar'};
+const gateTier=k=>feedTier(flyEver[k], FLY.err[k], flyErrSince[k]);
+// a map layer's OVERLAY (airspace/aircraft polygons): failSince is both the flag and the
+// clock, and everLoaded is forced true so a purely-visual feed only ever goes YELLOW (its
+// startup is already covered by the matching gate) — never red-grounds the verdict.
+const layerTier=id=>{ const st=LAYER_STATE[id]||{}; return feedTier(true, st.failSince>0, st.failSince); };
+// verdict red while any required GATE has never verified — keyed to the authoritative gates
+function flyNeverVerified(){ return Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='red'); }
+// gates currently errored (immediate, no grace) — the quiet yellow on the NOW header + verdict
+function flyUnknown(){ return Object.keys(FLY_ERR_LABEL).filter(k=>FLY.err[k]).map(k=>FLY_ERR_LABEL[k]); }
+window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // debug/test handle
+
+// Hard airspace restriction under the GPS position, from the loaded map layer: a Prohibited
+// (PROH) or national-security UAS (NSUF) zone that grounds the chart. Defense zones are
+// excluded (the FAA cap already grounds those); conditional/advisory zones never ground.
+function flyRestriction(){
+  const c={lat:USER.lat,lng:USER.lon}; let hit=null;
+  featsIn('airspace').forEach(f=>{
+    const p=f.properties;
+    if(hit||p.sev!=='hard'||p.cls==='DEF') return;
+    if(pointInFeature(f,c.lng,c.lat)) hit={code:p.code,name:p.name};
+  });
+  // NPS land is a hard no-fly too (can't launch/operate there)
+  if(!hit) featsIn('nps').forEach(f=>{
+    if(hit) return;
+    if(pointInFeature(f,c.lng,c.lat)) hit={code:'PARK',name:f.properties.name};
+  });
+  return hit;
+}
+
+// Apply every gate and build the render model — the canifly paint() core, plus
+// the sitrep integrations (TRFC cells, PCPN gate, hard-airspace grounding).
+function flyComputeDetail(){
+  const {aloft,kp,asp}=FLY.data;
+  const aspCapFt=asp==null?SPEC.regFt:(asp.ceilFt<=0?-1:Math.min(SPEC.regFt,asp.ceilFt));
+  const atLim=kt=>kt!=null&&Math.round(toMph(kt))>=LIM.wind;
+  const one=kt=>kt==null?'—':fmt(toMph(kt),0);
+  const cols=(aloft&&aloft.cols)||[];
+  const nowMs=Date.now();
+  // Kp in force at hour n = the last bin at or before that hour. NOW (n=0) prefers the
+  // last FINALIZED observed bin (the in-progress one is a revisable estimate).
+  const kpAt=n=>{
+    if(!kp||!kp.rows||!kp.rows.length) return null;
+    if(n===0){
+      for(let i=kp.rows.length-1;i>=0;i--){
+        const r=kp.rows[i]; if(r.ms<=nowMs && r.obs==='observed') return r.kp;
+      }
+    }
+    const t=nowMs+n*3600e3; let v=null;
+    for(const r of kp.rows){ if(r.ms<=t) v=r.kp; else break; }
+    return v!=null?v:kp.rows[0].kp;
+  };
+  const trafficCeil=flyTrafficCeilFt();   // NOW-only manned-traffic ceiling (Infinity = none)
+  const restrict=flyRestriction();   // a hard Prohibited/security zone grounds every column
+  let wxNow=null;   // NOW-column weather-gate diagnostics for the weather card
+  const grid=cols.map((c,n)=>{
+    const prof=makeProfile(c.windPts);
+    const visSM=c.visM!=null?c.visM*M_TO_SM:null;
+    const kpv=kpAt(n);
+    const gGust=atLim(c.gustKt), gVis=visSM!=null&&visSM<SPEC.visSM, gKp=kpv!=null&&kpv>=SPEC.kpGnd;
+    // PCPN — radar is a NOW product, so only the NOW column can carry the gate
+    const gPcpn=n===0&&FLY.precip===true;
+    const globalGrounded=gGust||gVis||gKp||gPcpn||!!restrict;   // hard airspace grounds all hours
+    const cloudCapFt=c.baseFt==null?Infinity:(c.baseFt-SPEC.clrFt);
+    let hitFt=null; for(const ft of ALTS_UP){ if(atLim(prof(ft))){ hitFt=ft; break; } }
+    const windCeilFt=hitFt==null?SPEC.regFt:hitFt-50;
+    // capture NOW's weather gates + raw values for the SITREP weather card (its line 3
+    // reads real telemetry: gust mph, wind-aloft peak, visibility SM, cloud base)
+    if(n===0){
+      let windPeak=0; for(const ft of ALTS){ const v=prof(ft); if(v!=null&&v>windPeak) windPeak=v; }
+      wxNow={gust:gGust,vis:gVis,precip:gPcpn,precipInbound:FLY.precipInbound===true,windCeilFt,cloudCapFt,
+        gustMph:c.gustKt, visSM, windPeakMph:windPeak};
+    }
+    // manned traffic caps the NOW column only (it's a live snapshot, like radar)
+    const tCeil = n===0 ? trafficCeil : Infinity;
+    // TRFC also gets its own marker (trfcAlt) so intruding low traffic is always
+    // visible even when a lower gate owns the binding-reason cell; at the first no-go band
+    // above the traffic ceiling (surface if low enough). Only NOW carries live traffic.
+    let trfcAlt = (n===0 && trafficCeil!==Infinity)
+      ? (trafficCeil<0 ? 0 : Math.min(SPEC.regFt, trafficCeil+50)) : null;
+    const capFt=Math.min(SPEC.regFt, cloudCapFt, windCeilFt, aspCapFt, tCeil);
+    const grounded=globalGrounded||capFt<0;
+    let maxFly=-1;
+    if(!grounded) for(const ft of ALTS){ if(ft<=capFt){ maxFly=ft; break; } }
+    // which cap binds → the code at the ceiling row (traffic wins ties, then FAA, cloud, wind)
+    const capSrc = tCeil<=aspCapFt&&tCeil<=cloudCapFt&&tCeil<=windCeilFt ? 'TRFC'
+             : aspCapFt<=cloudCapFt&&aspCapFt<=windCeilFt ? 'FAA'
+             : cloudCapFt<=windCeilFt ? 'SKY' : 'WIND';
+    let reasonAlt=null, reason='';
+    if(grounded){
+      reasonAlt=0;
+      reason = aspCapFt<0 ? 'FAA'
+             : restrict ? restrict.code
+             : tCeil<0 ? 'TRFC'
+             : gGust ? 'GUST'
+             : gVis ? 'VIS'
+             : gPcpn ? 'PCPN'
+             : gKp ? ('KP'+Math.round(kpv))
+             : capSrc;
+    }else if(maxFly<SPEC.regFt){
+      reasonAlt=maxFly+50; reason=capSrc;
+    }
+    // if a grounding traffic marker collides with a different grounding reason at SFC,
+    // bump TRFC up one band so both stay visible (same reason → same marker, no bump)
+    if(trfcAlt===0 && reasonAlt===0 && reason!=='TRFC') trfcAlt=50;
+    return {n,prof,gustKt:c.gustKt,capFt,maxFly,grounded,reason,reasonAlt,trfcAlt};
+  });
+  // hand the NOW column's binding reason to the weather card so its headline MATCHES the
+  // chart cell exactly (chart says GUST → card says HIGH WIND, never a different gate)
+  if(wxNow){ const g0=grid[0]; wxNow.reason=g0.reason; wxNow.grounded=g0.grounded; }
+  const cellState=(g,ft)=>{
+    if(g.grounded) return 'bad';
+    const kt=g.prof(ft); if(kt==null) return '';
+    if(ft>g.capFt||atLim(kt)) return 'bad';   // above any cap (incl. the traffic ceiling) → red
+    return 'good';
+  };
+  const nowMaxFly=grid.length?grid[0].maxFly:-1;
+  // Column headers. A FUTURE column that's grounded shows red. The NOW header is left
+  // uncoloured here and painted with the OVERALL verdict colour by renderClock() (so it
+  // matches the clock) — the verdict is a superset of the chart's own NOW state.
+  const colLabels=grid.map(g=>({v:g.n===0?'now':'+'+g.n+'h',
+    st:(g.n>0&&g.grounded)?'bad':'', now:g.n===0}));
+  const topFt=ALTS[0];
+  const altRows=ALTS.map(ft=>{
+    const cells=grid.map(g=>{
+      // the column's own binding cap code wins its cell (TRFC / FAA / SKY / WIND / …)
+      if(g.reasonAlt===ft) return {v:g.reason, st:cellState(g,ft), rsn:true};
+      // the independent TRFC traffic marker: shown at the traffic ceiling even when another
+      // gate owns the binding-reason cell, so a low plane is always visible on the chart
+      if(g.trfcAlt===ft) return {v:'TRFC', st:cellState(g,ft), rsn:true};
+      return {v:one(g.prof(ft)), st:cellState(g,ft)};
+    });
+    // hi = the bold "highest you can fly right now" label (the top green row)
+    return {a:ft===0?'sfc':comma(ft), u:ft===topFt?'ft':'',
+      st:cells.length&&cells[0].st==='bad'?'bad':'',
+      hi:nowMaxFly>=0&&ft===nowMaxFly, cells};
+  });
+  const gustCells=grid.map((g,i)=>({v:one(g.gustKt), st:atLim(g.gustKt)?'bad':'',
+    u:i===grid.length-1?'mph':''}));
+  const gustSt=gustCells.length&&gustCells[0].st==='bad'?'bad':'';
+  return {board:{colLabels,gustCells,gustSt,altRows},
+    // aspCapFt: LAANC ceiling gate (-1 grounds, <400 caps, 400 = no limit); aspUnknown =
+    // the FAA query failed (fail-open). Read by the SITREP's FAA CEILING card.
+    aspCapFt, aspUnknown:asp==null,
+    // kpNow / wxNow: the NOW-column Kp + weather gates, read by the SITREP so its
+    // SPACE WEATHER and weather cards agree with the chart.
+    kpNow:kpAt(0),
+    wxNow,
+    grid:grid.map(g=>({n:g.n,maxFly:g.maxFly,grounded:g.grounded,reason:g.reason,reasonAlt:g.reasonAlt,trfcAlt:g.trfcAlt}))};
+}
+
+const FLY_GRID_ATTRS='class="grid"';
+// the chart's top-left header cell = the VERDICT CLOCK (live local time, verdict-tinted)
+const clockCellHtml=()=>`<span class="ga clock ${VERDICT_CLASS[verdictSeverity]}">${clockText()}</span>`;
+function flyBoardHtml(b){
+  const unit=u=>u?`<i class="gu">${u}</i>`:'';
+  const cell=c=>`<span class="gc${c.st?' '+c.st:''}${c.rsn?' rsn':''}">${c.v==null?'':c.v}${unit(c.u)}</span>`;
+  const head=`<div class="grow ghead">${clockCellHtml()}${b.colLabels.map(l=>`<span class="gc${l.st?' '+l.st:''}${l.now?' now':''}">${l.v}</span>`).join('')}</div>`;
+  const alts=b.altRows.map(r=>`<div class="grow"><span class="ga${r.st?' '+r.st:''}${r.hi?' hi':''}">${r.a}${unit(r.u)}</span>${r.cells.map(cell).join('')}</div>`).join('');
+  const gust=`<div class="grow ggust"><span class="ga${b.gustSt?' '+b.gustSt:''}">gust</span>${b.gustCells.map(cell).join('')}</div>`;
+  return `<div ${FLY_GRID_ATTRS}>${head}${alts}${gust}</div>`;
+}
+// pre-data skeleton: the real grid frame with shimmer bars, so nothing shifts on load
+function flySkeletonHtml(){
+  const sk='<span class="gc"><i class="sk"></i></span>'.repeat(1+FC_HOURS);
+  const cols=['now',...Array.from({length:FC_HOURS},(_,k)=>'+'+(k+1)+'h')];
+  const head='<div class="grow ghead">'+clockCellHtml()
+    +cols.map((l,i)=>`<span class="gc${i===0?' now':''}">${l}</span>`).join('')+'</div>';
+  const rows=ALTS.map(ft=>`<div class="grow"><span class="ga">${ft===0?'sfc':comma(ft)}${ft===ALTS[0]?'<i class="gu">ft</i>':''}</span>${sk}</div>`).join('');
+  const gust=`<div class="grow ggust"><span class="ga">gust</span>${sk}</div>`;
+  return `<div ${FLY_GRID_ATTRS}>${head}${rows}${gust}</div>`;
+}
+function flyRender(){
+  const board=$('#fly-board'); if(!board) return;
+  // loading skeleton until FLY.detail exists, then the real grid (pane always visible)
+  board.innerHTML=FLY.detail?flyBoardHtml(FLY.detail.board):flySkeletonHtml();
+}
+function flyPaint(){ FLY.detail=FLY.data?flyComputeDetail():null; flyRender(); }
+
+// ---- refresh — from the pulse, viewport moves and boot. Each input keeps its cadence
+// (aloft ALOFT_TTL_MS, radar per bust window, Kp ~3 min, airspace its cache).
+// SINGLE-FLIGHT: while a refresh is in the air, new calls flag a trailing re-run, so a
+// pan burst can't stack concurrent hits on the rate-limited FAA service. ----
+let flyBusy=false, flyAgain=false, flyKpAt=0, flyAloftAt=0;
+const KP_STALE_MS=15*60*1000;   // a transient SWPC blip may not wipe a recent Kp
+const ALOFT_TTL_MS=15000;       // winds-aloft is an hourly model — 15 s is already generous
+async function flyRefresh(){
+  if(USER.lat==null) return;   // GPS-located only — nothing to compute pre-fix
+  if(flyBusy){ flyAgain=true; return; }
+  flyBusy=true;
+  try{
+    const base={lat:USER.lat,lon:USER.lon};
+    const rngMi=RNG.mi;   // snapshot — the radius can't shift mid-fetch
+    if(aspCache==null) hydrateAsp();
+    const cc=aspCache;
+    const matches=cc!=null&&cc.rng===rngMi&&havKm(base.lat,base.lon,cc.lat,cc.lon)<ASP_TOL_KM;
+    const age=cc!=null?Date.now()-cc.ts:Infinity;
+    const fresh=matches&&age<ASP_TTL;
+    const kpKeep=FLY.data!=null&&FLY.data.kp!=null&&Date.now()-flyKpAt<170000;
+    // winds-aloft: reuse the in-hand columns while they're fresh for this spot —
+    // the 5 s pulse then costs nothing between real fetches
+    const aloftKeep=FLY.data!=null&&FLY.data.aloft!=null&&Date.now()-flyAloftAt<ALOFT_TTL_MS
+      &&havKm(FLY.data.lat,FLY.data.lon,base.lat,base.lon)<ASP_TOL_KM;
+    // Fire all inputs in parallel but don't let the slow FAA query block the chart:
+    // await weather FIRST and paint with the last-good gates, then fold in the rest.
+    const pAloft = aloftKeep?Promise.resolve(FLY.data.aloft):retry(()=>getAloft(base.lat,base.lon),2).catch(()=>null);
+    const pKp    = kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp(),2).catch(()=>null);
+    const pAsp   = fresh?Promise.resolve({ceilFt:cc.ceilFt}):getAirspace(base.lat,base.lon,rngMi).catch(()=>null);
+    // two radar samples, BOTH centred on YOU: GREY ring (5 mi) grounds NOW, the fixed #3
+    // DATA RADIUS (DATA_MI) is the yellow "echo within range" heads-up
+    const pPrecip= retry(()=>sampleRadarPrecip(base.lat,base.lon,GREY_MI),2).catch(()=>null);
+    const pPrecipScreen= retry(()=>sampleRadarPrecip(base.lat,base.lon,DATA_MI),2).catch(()=>null);
+
+    const aloft=await pAloft;
+    if(aloft){
+      // paint now with the last-good gates (fresh ones repaint below); a gate with no
+      // value yet stays flagged unknown, so the NOW header yellows rather than reading 400
+      FLY.data={lat:base.lat,lon:base.lon,aloft,
+        kp:(FLY.data&&FLY.data.kp)||null, asp:(FLY.data&&FLY.data.asp)||null};
+      FLY.err.om=false; FLY.err.asp=FLY.data.asp==null; FLY.err.kp=FLY.data.kp==null;
+      flyPaint(); scheduleSitrep();
+    }else{
+      FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
+    }
+
+    const [kpRaw,aspRaw,precip,precipScreen]=await Promise.all([pKp,pAsp,pPrecip,pPrecipScreen]);
+    if(!aloftKeep&&aloft!=null) flyAloftAt=Date.now();   // a fresh aloft pull resets its clock
+    if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();
+    // Kp failed: fall back to recent last-good rather than lose the gate to one blip;
+    // beyond KP_STALE_MS stay null and yellow (unknown ≠ calm)
+    let kp=kpRaw;
+    if(kp==null&&FLY.data&&FLY.data.kp!=null&&Date.now()-flyKpAt<KP_STALE_MS) kp=FLY.data.kp;
+    let asp=aspRaw;
+    if(asp!=null){ if(!fresh){ aspCache={lat:base.lat,lon:base.lon,rng:rngMi,ceilFt:asp.ceilFt,ts:Date.now()}; persistAsp(); } }
+    else if(matches&&age<ASP_HARD_TTL) asp={ceilFt:cc.ceilFt};   // failed refetch → matching cache within hard TTL
+    FLY.precip=precip; FLY.err.radar=precip==null;
+    // yellow "nearby" = an echo within DATA_MI but NOT already in the 5 mi grey ring
+    FLY.precipInbound = precipScreen===true && precip!==true;
+    if(aloft){
+      FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
+      FLY.err.om=false; FLY.err.asp=asp==null;
+    }else{
+      if(FLY.data){ FLY.data.kp=kp; if(asp!=null){ FLY.data.asp=asp; FLY.err.asp=false; } }
+    }
+    FLY.err.kp=kp==null;
+    // maintain the freshness state per gate: latch "ever loaded" on a verified pull, and
+    // stamp/clear the failing-since clock — so gateTier() reads a consistent picture
+    for(const k in FLY_ERR_LABEL){
+      if(!FLY.err[k]) flyEver[k]=true;
+      flyErrSince[k]=FLY.err[k] ? (flyErrSince[k]||Date.now()) : 0;
+    }
+    // repaint the chart AND re-tick the SITREP: the title reads the NOW column
+    // (and the unknown-input flags), so fresh gate data must reach both.
+    flyPaint();
+    scheduleSitrep();
+  }finally{
+    flyBusy=false;
+    if(flyAgain){ flyAgain=false; flyRefresh(); }
+  }
+}
+// You've moved: refresh the weather card for the new position, and refetch the chart
+// DATA if you've moved beyond the airspace-cache tolerance.
+function flyOnMove(){
+  loadWeather();
+  if(FLY.data && havKm(FLY.data.lat,FLY.data.lon,USER.lat,USER.lon)<ASP_TOL_KM) return;
+  flyRefresh();
+}
+
+/* =====================================================================
+   7. VERDICT CLOCK — the overall can-I-fly verdict is shown as the COLOUR of the live
+   clock in the chart's top-left corner: green = go, yellow = caution, red = no-go.
+   sitrepTick computes verdictSeverity (0/1/2); the clock ticks every second on its own.
+   ===================================================================== */
+const VERDICT_CLASS=['go','caution','nogo'];   // CSS class per severity 0/1/2
+let verdictSeverity=0;
+// current local time (device timezone), 24-hour, no AM/PM — e.g. "15:07"
+function clockText(){
+  try{ return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false}); }
+  catch(e){ return ''; }
+}
+// paint the verdict colour onto BOTH the top-left clock and the NOW header cell — the two
+// glance points for "can I fly right now?" — plus the live time on the clock.
+function renderClock(){
+  const clock=document.querySelector('#fly-board .ga.clock');
+  if(clock){ clock.textContent=clockText(); clock.className='ga clock '+VERDICT_CLASS[verdictSeverity]; }
+  const now=document.querySelector('#fly-board .ghead .gc.now');
+  if(now) now.className='gc now '+VERDICT_CLASS[verdictSeverity];
+}
+
+/* =====================================================================
+   8. BOOT — no map. Start the GPS watch, kick the location-independent feeds, and run
+   the 5 s refresh pulse. Position-scoped feeds (aircraft/airspace/NPS) start on the
+   first GPS fix (see setUserFix); until then the SITREP shows the GPS locating card
+   under the loading chart (no empty acquiring screen).
+   ===================================================================== */
+function boot(){
+  // read-only display: block double-click / double-tap zoom, iOS pinch-zoom gestures, and
+  // the browser context menu, so a stray tap can never zoom or select the interface.
+  document.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});
+  document.addEventListener('contextmenu',e=>e.preventDefault());
+  ['gesturestart','gesturechange','gestureend'].forEach(ev=>
+    document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+  initLayers();
+  // location-INDEPENDENT feeds load now (military aircraft, NWS warnings, SPC outlook);
+  // position-scoped feeds wait for the first fix, which kicks them via setUserFix().
+  LAYERS.forEach(cfg=>{ LAYER_STATE[cfg.id].started=true; if(!cfg.viewport) runLayer(cfg); });
+  refreshBase=Date.now(); setInterval(refreshTick,1000); refreshTick();   // 5 s data pulse
+  loadXray(); setInterval(loadXray,180000);                               // GOES X-ray flare card
+  setInterval(renderClock,1000);                                          // live clock tick
+  flyRender();     // chart skeleton until the first fix pulls data
+  locate();        // start the GPS watch
+  sitrepTick();    // shows GPS locating card under the loading chart
+  if(!sitrepTimer) sitrepTimer=setInterval(sitrepTick,90000);
+  window.__sitrep.ready=true;   // test/boot signal (replaces the old map 'load')
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
+else boot();
+</script>
+</body>
+</html>
