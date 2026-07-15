@@ -1207,7 +1207,7 @@ function sitrepTick(){
   //    ambiguous (there is no map to glance at). Sits in the bottom WEATHER group, as the very
   //    last card (appended to wxTail below). --
   const locCard=mkCard('','📍','GPS LOCK',
-    USER.acc!=null?'accuracy ±'+Math.round(USER.acc * 3.28084)+' ft':'locating…'
+    USER.acc!=null?'accuracy ±'+Math.round(USER.acc* 3.28084)+U(' ft'):'locating…',
     lat.toFixed(4)+', '+lon.toFixed(4), false);
   wxTail.push(locCard);
 
