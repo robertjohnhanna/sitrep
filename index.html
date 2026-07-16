@@ -255,7 +255,7 @@ const HELI_NAME=/helicopter|rotorcraft|\brotor|robinson|sikorsky|eurocopter|\bag
 const isHeli=a=> a.category==='A7'
   || HELI_TYPES.has(String(a.t||'').trim().toUpperCase())
   || HELI_NAME.test(a.desc||'');
-// ONE property builder for every ADS-B contact (civil/mil/emergency feeds), so the
+// ONE property builder for every ADS-B contact (civil + military feeds), so the
 // card / chart / AGL fields never drift apart between feeds.
 function acProps(a,kind){
   return {_kind:kind, heli:isHeli(a)?1:0,
@@ -266,13 +266,11 @@ function acProps(a,kind){
     // barometric altitude kept separate so AGL can QNH-correct it; null if only geometric
     altBaro:(typeof a.alt_baro==='number'?a.alt_baro:null),
     spd:a.gs!=null?Math.round(a.gs):'?',
-    trk:a.track!=null?Math.round(a.track):null,
-    _rot:a.track!=null?a.track:(a.true_heading!=null?a.true_heading:0),
-    sq:a.squawk||'',hex:a.hex||'',mil:a.dbFlags&1?1:0};
+    hex:a.hex||'',mil:a.dbFlags&1?1:0};
 }
-const acFeature=(a,kind,extra)=>({type:'Feature',
+const acFeature=(a,kind)=>({type:'Feature',
   geometry:{type:'Point',coordinates:[a.lon,a.lat]},
-  properties:extra?Object.assign(acProps(a,kind),extra):acProps(a,kind)});
+  properties:acProps(a,kind)});
 function acFeatures(j,kind){
   return (j.ac||[]).filter(a=>a.lat!=null&&a.lon!=null).map(a=>acFeature(a,kind));
 }
@@ -970,7 +968,7 @@ function catItems(cfg,lat,lon,rKm){
 // feeds — ONE shared collector so the LOW AIRCRAFT card and the chart's TRFC cells agree
 function planesNear(lat,lon,rKm){
   const out=[], seen=new Set();
-  ['sos','nearair','mil'].forEach(id=>featsIn(id).forEach(f=>{
+  ['nearair','mil'].forEach(id=>featsIn(id).forEach(f=>{
     const p=f.properties;
     const alt=+p.alt; if(!isFinite(alt)) return;   // 'ground'/'?' → not airborne data
     const g=f.geometry&&f.geometry.coordinates; if(!g) return;
