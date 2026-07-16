@@ -1099,6 +1099,7 @@ function sitrepTick(){
     if(k==='asp' && !tier && layerTier('airspace')==='yellow') tier='yellow';
     if(tier==='red') redFeeds.push(label); else if(tier==='yellow') yellowFeeds.push(label);
   }
+  if(layerTier('nps')==='yellow') yellowFeeds.push('NPS');   // a failing NPS feed degrades the park no-fly check
   // AIRCRAFT is traffic, not a flyability gate — always YELLOW (missing traffic ≠ grounded),
   // never red. Shown until the planes are drawn (never loaded, none pulled) or while the
   // feed is failing.
@@ -1638,7 +1639,8 @@ function evalGates(tr){
   // colour TOGETHER now — the old immediate "quiet yellow" (an unexplained NOW colour
   // change up to 35 s before its card) is retired.
   g.data=flyNeverVerified()?2
-    :(Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='yellow')||layerTier('airspace')==='yellow')?1:0;
+    :(Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='yellow')
+      ||layerTier('airspace')==='yellow'||layerTier('nps')==='yellow')?1:0;
   // weather gates — the same NOW values the chart paints (wn = flyComputeDetail's wxNow)
   g.gust=wn&&wn.gust?2:0;
   g.vis =wn&&wn.vis?2:0;
@@ -1918,7 +1920,9 @@ async function flyRefresh(){
       FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
       FLY.err.om=false; FLY.err.asp=asp==null;
     }else{
-      if(FLY.data){ FLY.data.kp=kp; if(asp!=null){ FLY.data.asp=asp; FLY.err.asp=false; } }
+      if(FLY.data){ FLY.data.kp=kp;
+        if(asp!=null){ FLY.data.asp=asp; FLY.err.asp=false; }
+        else FLY.err.asp=true; }   // gate unresolved this cycle → last-good paints, but flagged unverified
     }
     FLY.err.kp=kp==null;
     // maintain the freshness state per gate: latch "ever loaded" on a verified pull, and
