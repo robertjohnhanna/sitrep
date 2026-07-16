@@ -13,10 +13,10 @@
 
 <!-- canifly — self-contained drone-preflight brief. One HTML file: no backend,
      build step, API keys, npm, or map library. Vanilla JS only. Located by GPS;
-     a full-screen card interface carries the flyability chart (with a verdict
+     a full-screen card interface carries the flyability chart (with a white live
      clock in its top-left corner) above a distance-sorted SITREP of nearby
      aircraft, airspace and hazards. Data refreshes every 5 s; the overall verdict
-     reads off the clock colour (green = go, yellow = caution, red = no-go). Every
+     reads off the NOW-column colour (green = go, yellow = caution, red = no-go). Every
      data feed is keyless and CORS-open. -->
 
 <style>
@@ -88,14 +88,11 @@
   #fly-pane .ggust .ga,#fly-pane .ggust .gc{border-top:1px solid rgba(116,133,150,.4)}
   /* a cap/gate code cell (GUST/VIS/SKY/WIND/FAA/TRFC/PCPN/KPx) */
   #fly-pane .gc.rsn{font-size:13px;font-weight:800;letter-spacing:.03em}
-  /* VERDICT CLOCK — the chart's top-left header cell: live local time, tinted by the
-     overall verdict so a glance at the corner answers "can I fly right now?" */
-  #fly-pane .ga.clock{justify-content:center;font-weight:800;font-size:15px;letter-spacing:.02em}
-  /* only the DIGITS carry the verdict colour (canifly logic) */
-  #fly-pane .ga.clock.go{color:var(--go)}
-  #fly-pane .ga.clock.caution{color:var(--caution)}
-  #fly-pane .ga.clock.nogo{color:var(--nogo)}
-  /* the H:MM colon is ALWAYS white (never verdict-tinted); JS blinks it each second */
+  /* CLOCK — the chart's top-left header cell: an all-white live local time with a blinking
+     colon. (The verdict colour lives on the NOW column header, not here.) */
+  /* the clock is ENTIRELY white — the verdict colour lives on the NOW header, not here */
+  #fly-pane .ga.clock{justify-content:center;font-weight:800;font-size:15px;letter-spacing:.02em;color:#eaf1f8}
+  /* the H:MM colon blinks between white and OFF-WHITE (never off/black) — see blinkColon */
   #fly-pane .ga.clock .clk-colon{color:#eaf1f8;margin:0 .03em}
   /* loading shimmer — one cell-text line tall, so nothing shifts on load */
   @keyframes flypulse{0%,100%{opacity:1}50%{opacity:.2}}
@@ -1693,8 +1690,8 @@ function flyComputeDetail(){
 }
 
 const FLY_GRID_ATTRS='class="grid"';
-// the chart's top-left header cell = the VERDICT CLOCK (live local time, verdict-tinted)
-const clockCellHtml=()=>`<span class="ga clock ${VERDICT_CLASS[verdictSeverity]}">${clockInnerHtml()}</span>`;
+// the chart's top-left header cell = the CLOCK (all-white live local time, blinking colon)
+const clockCellHtml=()=>`<span class="ga clock">${clockInnerHtml()}</span>`;
 function flyBoardHtml(b){
   const unit=u=>u?`<i class="gu">${u}</i>`:'';
   const cell=c=>`<span class="gc${c.st?' '+c.st:''}${c.rsn?' rsn':''}">${c.v==null?'':c.v}${unit(c.u)}</span>`;
@@ -1812,9 +1809,10 @@ function flyOnMove(){
 }
 
 /* =====================================================================
-   7. VERDICT CLOCK — the overall can-I-fly verdict is shown as the COLOUR of the live
-   clock in the chart's top-left corner: green = go, yellow = caution, red = no-go.
-   sitrepTick computes verdictSeverity (0/1/2); the clock ticks every second on its own.
+   7. CLOCK + VERDICT COLOUR — the top-left clock is plain white (live local time, blinking
+   colon). The overall can-I-fly verdict is shown as the COLOUR of the NOW column header:
+   green = go, yellow = caution, red = no-go. sitrepTick computes verdictSeverity (0/1/2);
+   renderClock ticks the time + repaints the NOW colour every second.
    ===================================================================== */
 const VERDICT_CLASS=['go','caution','nogo'];   // CSS class per severity 0/1/2
 let verdictSeverity=0;
@@ -1827,25 +1825,26 @@ function clockParts(){
 // (its own element so the blink + verdict paint never disturb each other).
 const clockInnerHtml=()=>{ const {h,m}=clockParts();
   return `<span class="clk-h">${h}</span><span class="clk-colon">:</span><span class="clk-m">${m}</span>`; };
-// Repaint the verdict colour on the clock digits AND the NOW header — the two "can I fly
-// right now?" glance points — plus advance the time. Updates ONLY the digit text (leaving the
-// colon element alone so its blink is uninterrupted), so a stable verdict never flickers.
+// Advance the time on the (all-white) clock and repaint the verdict colour on the NOW header —
+// the "can I fly right now?" glance point. Updates ONLY the digit text (leaving the colon
+// element alone so its blink is uninterrupted). The clock itself carries no verdict class.
 function renderClock(){
   const clock=document.querySelector('#fly-board .ga.clock');
   if(clock){
     let h=clock.querySelector('.clk-h'), m=clock.querySelector('.clk-m');
     if(!h||!m){ clock.innerHTML=clockInnerHtml(); h=clock.querySelector('.clk-h'); m=clock.querySelector('.clk-m'); }
     const p=clockParts(); h.textContent=p.h; m.textContent=p.m;
-    clock.className='ga clock '+VERDICT_CLASS[verdictSeverity];
   }
   const now=document.querySelector('#fly-board .ghead .gc.now');
   if(now) now.className='gc now '+VERDICT_CLASS[verdictSeverity];
 }
-// blink the colon every half-second (on 0.5 s / off 0.5 s = one blink per second). Re-queried
-// each tick so it survives chart re-renders; visibility (not display) keeps the digits steady.
-let _colonVisible=true;
+// blink the colon every half-second (bright 0.5 s / dim 0.5 s = one blink per second) between
+// white and OFF-WHITE — it dims, never disappears (never black). Re-queried each tick so it
+// survives chart re-renders.
+const COLON_WHITE='#eaf1f8', COLON_OFFWHITE='#9aa4af';
+let _colonBright=true;
 function blinkColon(){ const c=document.querySelector('#fly-board .clk-colon');
-  if(c) c.style.visibility=(_colonVisible=!_colonVisible)?'visible':'hidden'; }
+  if(c) c.style.color=(_colonBright=!_colonBright)?COLON_WHITE:COLON_OFFWHITE; }
 
 /* =====================================================================
    8. BOOT — no map. Start the GPS watch, kick the location-independent feeds, and run
