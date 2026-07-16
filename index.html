@@ -124,9 +124,12 @@ scroll, so cards changed size between the fit and scroll states. */
   .u{letter-spacing:0;font-style:normal}
   .u.lc{text-transform:none}
 
-  /* ---- LANDSCAPE — a wide, short viewport has no room for chart-over-list, so lay them
-          SIDE BY SIDE: chart on the LEFT, the scrolling SITREP on the RIGHT. ---- */
-  @media (orientation:landscape){
+  /* ---- PHONE IN LANDSCAPE ONLY — chart top / cards bottom is the default EVERYWHERE
+          (portrait, tablets, laptops, desktops). A phone on its side is the sole exception:
+          it's too short to stack, so lay chart LEFT / cards RIGHT. Gated to a phone by
+          landscape + a short viewport (≤500px tall — phones are; the smallest tablet, iPad
+          Mini, is 744px) + a coarse (touch) pointer (excludes a small laptop/desktop window). */
+  @media (orientation:landscape) and (max-height:500px) and (pointer:coarse){
     #app{flex-direction:row;max-width:none}
     #fly-pane{flex:0 1 auto;max-width:60%;min-width:0;justify-content:center;
       border-bottom:none;border-right:1px solid var(--line);
