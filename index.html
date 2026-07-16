@@ -738,7 +738,7 @@ function wxCard(wxState, wn){
     // headline per chart reason. GUST/VIS/PCPN are groundings; WIND (winds aloft) / SKY
     // (cloud) are the weather CAPS — the same codes the chart prints in the cell.
     const WXHEAD={
-      PCPN:['⛈️','PRECIPITATION','radar echo within '+GREY_MI+U(' mi')],
+      PCPN:['⛈️','PRECIPITATION','radar echo within '+RED_MI+U(' mi')],
       GUST:['💨','HIGH WIND','gust '+Math.round(wn.gustMph)+U(' mph')+' · max '+LIM.wind],
       WIND:['💨','HIGH WIND',Math.round(wn.windPeakMph)+U(' mph')+' aloft · max '+LIM.wind],
       VIS: ['🌫️','LOW VISIBILITY',(wn.visSM!=null?wn.visSM.toFixed(1):'—')+U(' SM')+' · min 3'+U(' SM')],
@@ -755,9 +755,9 @@ function wxCard(wxState, wn){
       return {pin:true, card:mkCard('alert',wind?'💨':'☁️',(wind?'WIND':'CLOUD')+' CEILING '+wxCap+U(' ft'),
         wind?'winds aloft over max':'low cloud base',condLine(),true)};
     }
-    // PRECIPITATION NEARBY: an echo within DATA_MI but not yet grounding — yellow heads-up
+    // PRECIPITATION NEARBY: an echo within the 5 mi GREY bubble but not yet grounding — yellow
     if(wn.precipInbound){
-      return {pin:true, card:mkCard('alert','🌧️','PRECIPITATION NEARBY','radar echo within '+DATA_MI+U(' mi'),condLine(),true)};
+      return {pin:true, card:mkCard('alert','🌧️','PRECIPITATION NEARBY','radar echo within '+GREY_MI+U(' mi'),condLine(),true)};
     }
   }
   // no gate — routine conditions card at the bottom (neutral / yellow-if-stale)
@@ -1300,14 +1300,14 @@ const FAA_SEP_FT=500;
 const WARN_AGL_FT=SPEC.regFt+FAA_SEP_FT;   // 400 + 500 = 900
 const LIM={wind:27};   // aircraft max wind [mph] — gates surface gust + caps the wind-aloft scan
 // two FIXED radii [statute miles], both centred on your GPS position: RED = OPERATIONAL
-// RANGE (1 mi) — the FAA point query, the RED low-aircraft warning, the TRFC cap. GREY =
-// OPERATIONAL BUBBLE (5 mi) — the traffic net + the YELLOW low-aircraft heads-up + the PCPN
-// grounding.
+// RANGE (1 mi) — the FAA point query, the RED low-aircraft warning, the TRFC cap, and the RED
+// precipitation grounding. GREY = OPERATIONAL BUBBLE (5 mi) — the traffic net + the YELLOW
+// low-aircraft heads-up + the YELLOW "precipitation nearby".
 const RED_MI=1, GREY_MI=5;
 const RNG={mi:RED_MI};
 // #3 DATA RADIUS [mi] — a FIXED radius, centred on YOU, identical on every device: everything
-// within it is PULLED (aircraft, airspace) and carded on the SITREP, and a radar echo within
-// it yellows the weather card. Fixed (not a pixel viewport) so results never vary by screen.
+// within it is PULLED (aircraft, airspace) and carded on the SITREP. Fixed (not a pixel
+// viewport) so results never vary by screen. (Precipitation is gated by the 1/5 mi rings above.)
 const DATA_MI=25;
 // Altitude ladder, 50 ft steps through the FAA band (matches the grid rows).
 const ALTS_UP=(()=>{const a=[];for(let f=0;f<=SPEC.regFt;f+=50)a.push(f);return a;})();
@@ -1446,7 +1446,7 @@ function persistAsp(){ store(ASP_CACHE_KEY,JSON.stringify(aspCache)); }
 
 // ---- PCPN: NEXRAD reflectivity within `rngMi` of the point? Samples the same Iowa
 // Mesonet mosaic, at native z8, on an offscreen canvas. Called twice per
-// refresh — GREY ring (5 mi, grounds NOW) and DATA_MI (the yellow "nearby"). Returns
+// refresh — RED ring (1 mi, grounds NOW) and GREY bubble (5 mi, the yellow "nearby"). Returns
 // true/false, or null when tiles can't be read (fails OPEN, yellows via FLY.err). ----
 const RADAR_Z=8, RADAR_ALPHA=80, RADAR_MIN_PX=2;
 const radarMemo=new Map();   // key → val: identical minute+point+range reuses the scan.
@@ -1517,8 +1517,8 @@ function flyTrafficCeilFt(){
 const FLY={
   data:null,     // last good {lat,lon,aloft,kp,asp} — lat/lon = where it was fetched
   detail:null,   // computed render model (kept for tests/debug)
-  precip:null,   // radar echo within the GREY ring (5 mi)? true/false/null → grounds NOW
-  precipInbound:null,   // radar echo within the #3 data radius (DATA_MI) but NOT the 5 mi ring → yellow "nearby"
+  precip:null,   // radar echo within the RED ring (1 mi)? true/false/null → grounds NOW
+  precipInbound:null,   // radar echo within the GREY bubble (5 mi) but NOT the 1 mi RED ring → yellow "nearby"
   // Every gate starts UNVERIFIED (true), not clear — so the app never opens falsely-green.
   // Each clears as its feed pulls + prints; while a gate has NEVER loaded the verdict
   // GROUNDS RED (can't confirm → don't fly) and a red DATA card names it, immediately (no
@@ -1751,10 +1751,10 @@ async function flyRefresh(){
     const pAloft = aloftKeep?Promise.resolve(FLY.data.aloft):retry(()=>getAloft(base.lat,base.lon),2).catch(()=>null);
     const pKp    = kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp(),2).catch(()=>null);
     const pAsp   = fresh?Promise.resolve({ceilFt:cc.ceilFt}):getAirspace(base.lat,base.lon,rngMi).catch(()=>null);
-    // two radar samples, BOTH centred on YOU: GREY ring (5 mi) grounds NOW, the fixed #3
-    // DATA RADIUS (DATA_MI) is the yellow "echo within range" heads-up
-    const pPrecip= retry(()=>sampleRadarPrecip(base.lat,base.lon,GREY_MI),2).catch(()=>null);
-    const pPrecipScreen= retry(()=>sampleRadarPrecip(base.lat,base.lon,DATA_MI),2).catch(()=>null);
+    // two radar samples, BOTH centred on YOU: an echo in the 1 mi RED ring GROUNDS NOW; an
+    // echo in the 5 mi GREY bubble (but not the 1 mi ring) is the YELLOW "nearby" heads-up
+    const pPrecipRed = retry(()=>sampleRadarPrecip(base.lat,base.lon,RED_MI),2).catch(()=>null);
+    const pPrecipGrey= retry(()=>sampleRadarPrecip(base.lat,base.lon,GREY_MI),2).catch(()=>null);
 
     const aloft=await pAloft;
     if(aloft){
@@ -1768,7 +1768,7 @@ async function flyRefresh(){
       FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
     }
 
-    const [kpRaw,aspRaw,precip,precipScreen]=await Promise.all([pKp,pAsp,pPrecip,pPrecipScreen]);
+    const [kpRaw,aspRaw,precipRed,precipGrey]=await Promise.all([pKp,pAsp,pPrecipRed,pPrecipGrey]);
     if(!aloftKeep&&aloft!=null) flyAloftAt=Date.now();   // a fresh aloft pull resets its clock
     if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();
     // Kp failed: fall back to recent last-good rather than lose the gate to one blip;
@@ -1778,9 +1778,9 @@ async function flyRefresh(){
     let asp=aspRaw;
     if(asp!=null){ if(!fresh){ aspCache={lat:base.lat,lon:base.lon,rng:rngMi,ceilFt:asp.ceilFt,ts:Date.now()}; persistAsp(); } }
     else if(matches&&age<ASP_HARD_TTL) asp={ceilFt:cc.ceilFt};   // failed refetch → matching cache within hard TTL
-    FLY.precip=precip; FLY.err.radar=precip==null;
-    // yellow "nearby" = an echo within DATA_MI but NOT already in the 5 mi grey ring
-    FLY.precipInbound = precipScreen===true && precip!==true;
+    FLY.precip=precipRed; FLY.err.radar=precipRed==null;
+    // yellow "nearby" = an echo within the 5 mi GREY bubble but NOT already in the 1 mi RED ring
+    FLY.precipInbound = precipGrey===true && precipRed!==true;
     if(aloft){
       FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
       FLY.err.om=false; FLY.err.asp=asp==null;
