@@ -67,10 +67,9 @@
   #fly-pane .ga{justify-content:flex-start;color:var(--ink);letter-spacing:.03em;font-size:12px}
   #fly-pane .gc{justify-content:center;font-weight:700;font-size:15px;
     color:var(--ink);border-left:1px solid #16212b}   /* faint rule between time columns */
-  /* reference-unit tags (FT, MPH) */
-  #fly-pane .gu{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
-  /* small compass direction, sized like the unit tags, placed AFTER the gust-row wind number */
-  #fly-pane .wd{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
+  /* reference tags — unit (FT / MPH) and the gust-cell compass direction — ALL one fixed
+     size, so ft, mph and direction render identically despite sitting in different cells */
+  #fly-pane .gu,#fly-pane .wd{font-size:10px;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
   /* cell fills — binary: fly / can't fly */
   #fly-pane .gc.good{background:rgba(47,224,122,.14);color:var(--go)}
   #fly-pane .gc.bad{background:rgba(255,68,85,.16);color:var(--nogo)}
