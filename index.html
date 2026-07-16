@@ -71,10 +71,6 @@
   #fly-pane .gu{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
   /* small compass direction, sized like the unit tags, placed AFTER the gust-row wind number */
   #fly-pane .wd{font-size:.58em;font-weight:600;color:inherit;letter-spacing:.02em;margin-left:.18em}
-  /* last gust cell: stack the mph unit over the direction, both small, behind the number */
-  #fly-pane .gc .stk{display:inline-flex;flex-direction:column;align-items:flex-start;
-    line-height:1.05;vertical-align:middle;margin-left:.18em}
-  #fly-pane .gc .stk .gu,#fly-pane .gc .stk .wd{margin:0}
   /* cell fills — binary: fly / can't fly */
   #fly-pane .gc.good{background:rgba(47,224,122,.14);color:var(--go)}
   #fly-pane .gc.bad{background:rgba(255,68,85,.16);color:var(--nogo)}
@@ -1690,8 +1686,8 @@ function flyComputeDetail(){
   });
   // gust row: shows wind DIRECTION (8-point compass, small) + gust speed. It no longer changes
   // colour — a gust grounding already surfaces on the surface row (the red 'GUST' reason cell).
-  const gustCells=grid.map((g,i)=>({v:one(g.gustMph), dir:g.windDir!=null?compass(g.windDir):'',
-    u:i===grid.length-1?'mph':''}));
+  // The 'mph' unit rides the row's "gust" label (like "ft" on the top altitude label), not a cell.
+  const gustCells=grid.map(g=>({v:one(g.gustMph), dir:g.windDir!=null?compass(g.windDir):''}));
   return {board:{colLabels,gustCells,altRows},
     // aspCapFt: LAANC ceiling gate (-1 grounds, <400 caps, 400 = no limit); aspUnknown =
     // the FAA query failed (fail-open). Read by the SITREP's FAA CEILING card.
@@ -1708,17 +1704,14 @@ const FLY_GRID_ATTRS='class="grid"';
 const clockCellHtml=()=>`<span class="ga clock">${clockInnerHtml()}</span>`;
 function flyBoardHtml(b){
   const unit=u=>u?`<i class="gu">${u}</i>`:'';
-  // gust cells put the compass direction AFTER the number (small). The last cell also carries
-  // the "mph" unit, so there it stacks mph over the direction, both small, behind the number.
-  const tail=c=>c.u
-    ? `<span class="stk"><i class="gu">${c.u}</i>${c.dir?`<i class="wd">${c.dir}</i>`:''}</span>`
-    : (c.dir?`<i class="wd">${c.dir}</i>`:'');
+  // gust cells put the 8-point compass direction AFTER the number (small)
+  const tail=c=>c.dir?`<i class="wd">${c.dir}</i>`:'';
   const cell=c=>`<span class="gc${c.st?' '+c.st:''}${c.rsn?' rsn':''}">${c.v==null?'':c.v}${tail(c)}</span>`;
   // the NOW header is rendered WITH the current verdict class baked in (not left uncoloured for
   // renderClock to fill later) so it never flickers to the default ink between refreshes.
   const head=`<div class="grow ghead">${clockCellHtml()}${b.colLabels.map(l=>`<span class="gc${l.st?' '+l.st:''}${l.now?' now '+VERDICT_CLASS[verdictSeverity]:''}">${l.v}</span>`).join('')}</div>`;
   const alts=b.altRows.map(r=>`<div class="grow"><span class="ga${r.st?' '+r.st:''}${r.hi?' hi':''}">${r.a}${unit(r.u)}</span>${r.cells.map(cell).join('')}</div>`).join('');
-  const gust=`<div class="grow ggust"><span class="ga">gust</span>${b.gustCells.map(cell).join('')}</div>`;
+  const gust=`<div class="grow ggust"><span class="ga">gust${unit('mph')}</span>${b.gustCells.map(cell).join('')}</div>`;
   return `<div ${FLY_GRID_ATTRS}>${head}${alts}${gust}</div>`;
 }
 // pre-data skeleton: the real grid frame with shimmer bars, so nothing shifts on load
@@ -1728,7 +1721,7 @@ function flySkeletonHtml(){
   const head='<div class="grow ghead">'+clockCellHtml()
     +cols.map((l,i)=>`<span class="gc${i===0?' now '+VERDICT_CLASS[verdictSeverity]:''}">${l}</span>`).join('')+'</div>';
   const rows=ALTS.map(ft=>`<div class="grow"><span class="ga">${ft===0?'sfc':comma(ft)}${ft===ALTS[0]?'<i class="gu">ft</i>':''}</span>${sk}</div>`).join('');
-  const gust=`<div class="grow ggust"><span class="ga">gust</span>${sk}</div>`;
+  const gust=`<div class="grow ggust"><span class="ga">gust<i class="gu">mph</i></span>${sk}</div>`;
   return `<div ${FLY_GRID_ATTRS}>${head}${rows}${gust}</div>`;
 }
 function flyRender(){
