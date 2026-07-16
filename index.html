@@ -1062,6 +1062,7 @@ function persistAsp(){ store(ASP_CACHE_KEY,JSON.stringify(aspCache)); }
 // radar precip sampler — is there NEXRAD reflectivity within rngMi? Tiles composite on an offscreen
 // canvas at native z8; returns true/false, or null when tiles can't be read (fails OPEN via FLY.err)
 const RADAR_Z=8, RADAR_ALPHA=80, RADAR_MIN_PX=2;   // alpha threshold + ≥2 px kills speckle
+const RADAR_TILE_TIMEOUT_MS=8000;   // hard bound per tile — keeps the refresh cycle finite on a stalled connection
 const radarMemo=new Map();   // same window+point+range reuses the scan
 const RADAR_MEMO_MAX=8;      // small LRU — the two ring samples can't evict each other
 async function sampleRadarPrecip(lat,lon,rngMi){
@@ -1084,7 +1085,9 @@ async function sampleRadarPrecip(lat,lon,rngMi){
     tiles.push({x:((tx%n)+n)%n,y:ty,px:(tx-tx0)*256,py:(ty-ty0)*256});   // x wraps the antimeridian
   const imgs=await Promise.all(tiles.map(t=>new Promise((res,rej)=>{
     const im=new Image(); im.crossOrigin='anonymous';
-    im.onload=()=>res({t,im}); im.onerror=()=>rej(new Error('radar tile failed'));
+    const to=setTimeout(()=>{ im.src=''; rej(new Error('radar tile timeout')); },RADAR_TILE_TIMEOUT_MS);   // Image() has no native timeout — a stalled socket would otherwise hang for minutes
+    im.onload=()=>{ clearTimeout(to); res({t,im}); };
+    im.onerror=()=>{ clearTimeout(to); rej(new Error('radar tile failed')); };
     im.src=RADAR_TILE_URL.replace('{z}',RADAR_Z).replace('{x}',t.x).replace('{y}',t.y)+'?'+bust;
   })));
   const w=(tx1-tx0+1)*256, h=(ty1-ty0+1)*256;
@@ -1293,13 +1296,15 @@ function flyPaint(){ FLY.detail=FLY.data?flyComputeDetail():null; flyRender(); }
 
 // chart refresh — SINGLE-FLIGHT: while one is in the air, new calls flag a trailing re-run,
 // so bursts can't stack concurrent hits on the rate-limited FAA service
-let flyBusy=false, flyAgain=false, flyKpAt=0, flyAloftAt=0;
+let flyBusy=false, flyAgain=false, flyKpAt=0, flyAloftAt=0, flyGen=0, flyBusyAt=0;
 const KP_STALE_MS=15*60*1000;   // a transient SWPC blip may reuse a recent Kp this long
 const ALOFT_TTL_MS=15000;       // winds-aloft is an hourly model — 15 s reuse is already generous
+const FLY_STALL_MS=45000;       // > the longest bounded cycle — past this the cycle is presumed wedged and a new one takes over
 async function flyRefresh(){
   if(USER.lat==null) return;   // nothing to compute pre-fix
-  if(flyBusy){ flyAgain=true; return; }
-  flyBusy=true;
+  if(flyBusy && Date.now()-flyBusyAt<FLY_STALL_MS){ flyAgain=true; return; }   // in flight and healthy → queue a trailing re-run
+  flyBusy=true; flyBusyAt=Date.now();
+  const myGen=++flyGen;   // generation token — a stall-superseded cycle must not write stale gates over fresh ones
   try{
     const base={lat:USER.lat,lon:USER.lon};
     const rngMi=RNG.mi;   // snapshot — the radius can't shift mid-fetch
@@ -1317,12 +1322,13 @@ async function flyRefresh(){
       &&havMi(FLY.data.lat,FLY.data.lon,base.lat,base.lon)<ASP_TOL_MI;   // reuse in-hand columns while fresh for this spot
     const pAloft = aloftKeep?Promise.resolve(FLY.data.aloft):retry(()=>getAloft(base.lat,base.lon),2).catch(()=>null);   // all inputs fire in parallel
     const pKp    = kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp(),2).catch(()=>null);
-    const pGrid  = fresh?Promise.resolve({ceilFt:cc.ceilFt}):getLaancCeil(base.lat,base.lon,rngMi).catch(()=>null);
-    const pDef   = defFresh?Promise.resolve({active:dc.active}):getDefense(base.lat,base.lon,rngMi).catch(()=>null);
+    const pGrid  = fresh?Promise.resolve({ceilFt:cc.ceilFt}):retry(()=>getLaancCeil(base.lat,base.lon,rngMi),2).catch(()=>null);   // the legal gate deserves the same 2 tries as everything else
+    const pDef   = defFresh?Promise.resolve({active:dc.active}):retry(()=>getDefense(base.lat,base.lon,rngMi),2).catch(()=>null);
     const pPrecipRed = retry(()=>sampleRadarPrecip(base.lat,base.lon,RED_MI),2).catch(()=>null);    // operational-ring echo grounds NOW
     const pPrecipBuf= retry(()=>sampleRadarPrecip(base.lat,base.lon,BUFFER_MI),2).catch(()=>null);  // buffer-ring echo = yellow "nearby"
 
     const aloft=await pAloft;   // weather first — paint with last-good gates rather than wait on the slow FAA query
+    if(myGen!==flyGen) return;   // superseded by a stall takeover — drop this cycle's writes
     if(aloft){
       FLY.data={lat:base.lat,lon:base.lon,aloft,
         kp:(FLY.data&&FLY.data.kp)||null, asp:(FLY.data&&FLY.data.asp)||null};
@@ -1333,6 +1339,7 @@ async function flyRefresh(){
     }
 
     const [kpRaw,gridRaw,defRaw,precipRed,precipBuf]=await Promise.all([pKp,pGrid,pDef,pPrecipRed,pPrecipBuf]);
+    if(myGen!==flyGen) return;   // superseded mid-flight — a newer cycle owns the gates now
     if(!aloftKeep&&aloft!=null) flyAloftAt=Date.now();   // fresh pulls reset their clocks
     if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();
     let kp=kpRaw;
@@ -1362,8 +1369,10 @@ async function flyRefresh(){
     flyPaint();        // fresh gate data must reach both the chart…
     scheduleSitrep();  // …and the SITREP/verdict
   }finally{
-    flyBusy=false;
-    if(flyAgain){ flyAgain=false; flyRefresh(); }
+    if(myGen===flyGen){   // a superseded cycle leaves the flags to its successor
+      flyBusy=false;
+      if(flyAgain){ flyAgain=false; flyRefresh(); }
+    }
   }
 }
 

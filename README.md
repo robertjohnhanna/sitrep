@@ -122,7 +122,8 @@ The cells are strictly binary — **no yellow ever lives in the grid**. Softer c
 Kp NOW takes the worse of the last finalized observation and the in-progress estimate (a
 rising storm shows in the estimate first). Radar is *sampled*, not drawn: tiles composite
 on an offscreen canvas and ≥2 opaque pixels inside the ring counts as an echo (kills
-speckle), one fresh mosaic per 60 s window. Cloud base = the lowest pressure deck with
+speckle), one fresh mosaic per 60 s window; tile loads hard-timeout at 8 s so a stalled
+connection can never wedge the refresh cycle (every other fetch is already abort-bounded). Cloud base = the lowest pressure deck with
 ≥12% cover, min'd with an LCL estimate from the temp/dew-point spread.
 
 **Precip: NOW vs future.** The NOW column is live NEXRAD — ground truth, and the only
