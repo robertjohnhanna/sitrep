@@ -714,10 +714,12 @@ async function loadWeather(force){
   finally{ wxBusy=false; scheduleSitrep(); }
 }
 // One SITREP card is a NAMED record, not a positional tuple, so the sort/render code reads
-// fields instead of magic indices. cls: '' / 'alert' (yellow) / 'danger' (red). hazard: feeds
-// the verdict colour (traffic omits it). col: an explicit headline hex (airspace / aircraft
-// identity colour). km: range for the in-category sort (set after construction). Absent
-// fields are undefined.
+// fields instead of magic indices. cls: '' / 'alert' (yellow) / 'danger' (red) — DISPLAY
+// colour, derived from the gate table's severity (SEV_CLS / the gate classifiers), never
+// decided ad hoc. hazard: RANKING only — promotes the card into the red/yellow warning
+// sections; a card NEVER votes on the verdict (that is evalGates' job alone). col: an
+// explicit headline hex (airspace / aircraft identity colour). km: range for the
+// in-category sort (set after construction). Absent fields are undefined.
 const mkCard=(cls,ic,l1,l2,l3,hazard,col)=>({cls,ic,l1,l2,l3,hazard,col});
 // THE ONE weather card — a single feed, a single card. It changes rank/colour/text
 // with severity: a weather GATE limiting NOW promotes it to a top hazard (red grounded /
@@ -900,7 +902,7 @@ const acIcon=f=>f.properties.heli?'🚁':'✈️';
 const acTail=(f,n,fb)=>cut(f.properties.flight||f.properties.hex||fb||'?',n);
 const CATS=[
   {src:'nws', hazard:true, icon:'⚠️',
-   cls:f=>/Extreme|Severe/i.test(f.properties.severity)?'danger':'alert',
+   cls:f=>SEV_CLS[nwsSev(f)],   // the ONE classifier — the nws gate scores from it too
    head:f=>cut((f.properties.event||'warning').replace(/\s*warning$/i,'').toUpperCase(),22),
    sub:f=>cut(f.properties.area,26),
    // line 3 = when the warning ends (severity is already in the headline + colour)
@@ -911,13 +913,15 @@ const CATS=[
   {src:'nearair', hazard:false, air:true, icon:acIcon, cls:()=>'',
    head:f=>acTail(f,12),
    sub:acSub, detail:ALT},
-  // FAA airspace restrictions that gate a drone — HARD no-fly (red: defense/prohibited/
-  // security) or CONDITIONAL (yellow: restricted/stadium, only when active). hazard:true.
+  // FAA airspace restrictions that gate a drone — HARD no-fly or CONDITIONAL
+  // (restricted/stadium, only when active). hazard:true. Colour follows the gate table:
+  // RED only when you're INSIDE a hard zone (g.restrict grounds the chart with it);
+  // a zone merely NEAR you — even a hard one — is the g.zones proximity caution (yellow).
   {src:'airspace', hazard:true, filter:f=>f.properties.sev==='hard'||f.properties.sev==='caution',
    // class glyph: 🛡️ defense · 🔒 security · ⛔ prohibited · 🏟️ stadium · ⚠️ restricted
    icon:f=>({DEF:'🛡️',NSUFR:'🔒',P:'⛔',STDM:'🏟️',R:'⚠️'}[f.properties.cls]
      ||(f.properties.sev==='hard'?'⛔':'⚠️')),
-   cls:f=>f.properties.sev==='hard'?'danger':'alert',
+   cls:(f,inside)=>(inside&&f.properties.sev==='hard')?'danger':'alert',
    head:f=>({DEF:'DEFENSE AIRSPACE',NSUFR:'SECURITY NO-FLY',P:'PROHIBITED AREA',R:'RESTRICTED AREA',
      STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
@@ -936,7 +940,8 @@ const CATS=[
    sub:f=>cut(f.properties.name||'—',26),
    detail:()=>'authorization (LAANC)'},
   // National Park Service lands — a drone no-fly (can't launch / land / operate).
-  {src:'nps', hazard:true, icon:'🏞️', cls:()=>'danger',
+  // RED when you're ON park land (g.restrict grounds); NEAR it = proximity caution.
+  {src:'nps', hazard:true, icon:'🏞️', cls:(f,inside)=>inside?'danger':'alert',
    head:f=>cut(f.properties.name||'NPS LAND',20),
    sub:()=>'drones prohibited', detail:f=>cut(f.properties.utype||'NPS unit',18)},
 ];
@@ -990,11 +995,21 @@ function sitrepTick(){
   // fully synchronous — reads only already-loaded state.
   const rangeKm=RED_MI*MI_TO_KM;
   // aircraft are tracked further out (the 5 mi GREY bubble) so you see traffic approaching:
-  // low in the grey bubble → yellow heads-up; low inside the 1 mi red ring → red warning.
+  // low in the grey bubble → yellow heads-up; low inside the 1 mi red ring → escalated.
   const warnKm=GREY_MI*MI_TO_KM;
-  // no GPS fix yet → red verdict + GPS locating card (no empty "acquiring" screen)
+  // THE VERDICT — one traffic assessment, one gate table, one fold. Computed before any
+  // card exists: cards below are pure info + ranking views of the same gates.
+  const tr=assessTraffic();
+  const gates=evalGates(tr);
+  verdictSeverity=Math.max(...Object.values(gates));
+  window.__sitrep.gates=gates;   // debug/test handle
+  renderClock();   // the visible verdict = the NOW column header colour
+  { const t=$('#sit-title'); if(t){   // hidden canonical verdict element (tests/parity)
+    t.classList.remove('warn','alert');
+    if(verdictSeverity>=2) t.classList.add('warn'); else if(verdictSeverity>=1) t.classList.add('alert');
+  }}
+  // no GPS fix yet → the gps gate reds the verdict; show the locating card
   if(USER.lat==null){
-    verdictSeverity=2; renderClock();
     const rows=[];
     const row=c=>rows.push(
       `<div class="sit-row${c.cls?' '+c.cls:''}"><span class="ic">${c.ic}</span>`+
@@ -1019,55 +1034,41 @@ function sitrepTick(){
 
   const cards=[];   // array of mkCard() records
 
-  // -- LOW AIRCRAFT (two tiers, NO flash): a plane below WARN_AGL_FT (the 400 ft ceiling +
-  //    500 ft separation). WHERE it is sets the tier: inside the 1 mi RED range ring → a
-  //    RED WARNING; out in the 5 mi GREY bubble → a YELLOW heads-up. The plane's OWN card
-  //    (below) transforms into the alert while it's low and reverts on climb-out, so there is
-  //    always exactly ONE card per plane. planesNear() is the same deduped collector that
-  //    feeds the chart's TRFC cells, so card and chart always agree. AGL = QNH-corrected MSL
-  //    altitude − ground elevation UNDER THE PLANE (cached, keyless Open-Meteo). --
-  const acGround=groundElevFt(lat,lon);          // ft AMSL at your position, null until fetched
-  const near=planesNear(lat,lon,warnKm);
-  // pull terrain under your position + every plausibly-low plane in one batch
-  ensureGroundElev([[lat,lon],...near.filter(a=>a.alt<AGL_CAND_MAX_FT).map(a=>[a.pt[1],a.pt[0]])]);
-  const lowAc=near
-    .map(a=>{ const {ground,agl}=planeAglFt(a,acGround); return {...a,ground,agl}; })
-    .filter(a=>a.agl<WARN_AGL_FT);
-  // keyed by the FEATURE OBJECT (the card loop below iterates the same stored features) —
-  // an id string would collide for anonymous contacts with no hex and no callsign
-  const breachInfo=new Map();   // feature → {label:'254 ft AGL', inRange:bool}
-  lowAc.forEach(a=>{
-    const inRange=havKm(lat,lon,a.pt[1],a.pt[0])<=rangeKm;   // inside the 1 mi red ring?
+  // -- LOW AIRCRAFT: a plane below WARN_AGL_FT (400 ft ceiling + 500 ft separation) from
+  //    the SAME assessTraffic() result the traffic gate and the chart's TRFC cells read,
+  //    so card, gate and chart can never disagree. The plane's OWN card (below) transforms
+  //    while it's low and reverts on climb-out — exactly ONE card per plane. Colour follows
+  //    the gate math: RED only when the plane GROUNDS the chart (AGL ≤ separation, in the
+  //    1 mi ring — the NOW column reds with it); a capping or grey-bubble plane is a
+  //    YELLOW heads-up. AGL = QNH-corrected MSL − ground elevation UNDER THE PLANE.
+  //    Keyed by the FEATURE OBJECT (the card loop iterates the same stored features) —
+  //    an id string would collide for anonymous contacts with no hex and no callsign.
+  const breachInfo=new Map();   // feature → {label:'254 ft AGL', inRange, grounds}
+  tr.low.forEach(a=>{
     breachInfo.set(a.f,{
       label:Math.max(0,Math.round(a.agl))+U(' ft')+(a.ground==null?'':' AGL'),
-      inRange});
+      inRange:a.inRange, grounds:a.grounds});
   });
 
-  // -- FAA CEILING (pinned): surfaces the chart's own airspace gate — reads the SAME
-  //    aspCapFt the chart's FAA column reads (LAANC grid + defense TFRs), so they can't
-  //    disagree: red no-fly when it grounds, yellow when it caps < 400 ft. Unknown → no card. --
-  const faaCap=(FLY.detail&&!FLY.detail.aspUnknown)?FLY.detail.aspCapFt:null;
-  if(faaCap!=null && faaCap<SPEC.regFt){
+  // -- FAA CEILING (pinned): a VIEW of the faa gate — value from the chart's aspCapFt,
+  //    colour from the gate's severity (SEV_CLS), so card, gate and chart agree. --
+  if(gates.faa){
     const rangeTxt='within '+RNG.mi.toFixed(1)+U(' mi');
-    if(faaCap<0) cards.push(mkCard('danger','⛔','FAA NO-FLY','LAANC grid · 0 ft ceiling',
-      rangeTxt,true));
-    else cards.push(mkCard('alert','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',
-      rangeTxt,true));
+    const faaCap=FLY.detail.aspCapFt;
+    cards.push(gates.faa===2
+      ? mkCard('danger','⛔','FAA NO-FLY','LAANC grid · 0 ft ceiling',rangeTxt,true)
+      : mkCard('alert','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',rangeTxt,true));
   }
 
   // the weather card (below) folds every weather gate into itself — one feed, one card
   const wn=FLY.detail&&FLY.detail.wxNow;
 
-  // -- SPACE WEATHER (pinned): a Kp storm degrades GPS/compass. RED grounding at
-  //    Kp ≥ kpGnd (G3+), YELLOW at Kp ≥ kpCaut (G1–G2). Reads the SAME kpNow the chart's
-  //    KP gate uses, so they can't disagree. Quiet/unknown → no card. --
+  // -- SPACE WEATHER (pinned): a VIEW of the kp gate — a Kp storm degrades GPS/compass.
+  //    Value from the chart's kpNow, colour from the gate severity. Quiet/unknown → no card. --
   const kpNow=FLY.detail?FLY.detail.kpNow:null;
-  if(kpNow!=null && kpNow>=SPEC.kpGnd){
-    cards.push(mkCard('danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
-      'GPS / compass unreliable',true));
-  }else if(kpNow!=null && kpNow>=SPEC.kpCaut){
-    cards.push(mkCard('alert','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
-      'GPS accuracy may be reduced',true));
+  if(gates.kp){
+    cards.push(mkCard(SEV_CLS[gates.kp],'🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      gates.kp===2?'GPS / compass unreliable':'GPS accuracy may be reduced',true));
   }
 
   // -- DATA HEALTH (pinned): every feed classified by the ONE feedTier() rule. RED "not
@@ -1095,8 +1096,9 @@ function sitrepTick(){
   const dataFeeds=[...redFeeds,...yellowFeeds];
   if(dataFeeds.length){
     const red=redFeeds.length>0;
-    // hazard flag colours the verdict — true for a real gate problem, FALSE when the only
-    // thing pending is aircraft (traffic is informational; planes still loading ≠ caution)
+    // hazard (RANKING) mirrors the data gate's scope: promoted for a real gate-feed
+    // problem, NOT when the only thing pending is aircraft (traffic is informational —
+    // the data gate likewise scores 0 for an aircraft-only gap)
     const dataHazard=dataFeeds.some(f=>f!=='aircraft');
     cards.push(mkCard(red?'danger':'alert','📡', red?'DATA NOT LOADED':'DATA UNVERIFIED',
       cut(dataFeeds.join(' · '),30), red?'acquiring — verify before flying':'retrying every 5 s', dataHazard));
@@ -1128,13 +1130,14 @@ function sitrepTick(){
     const g=f.geometry; if(!g) return;
     // pt = closest edge point to your position (label + sorting); inside → "overhead"
     const inside=g.type!=='Point'&&pointInFeature(f,lon,lat);
-    let cls=cfg.cls?cfg.cls(f):'', det=null, headOv=null, subOv=null, icOv=null, hazardOv=null;
-    // LOW AIRCRAFT: a low plane's own card BECOMES the alert (RED WARNING inside the 1 mi red
-    // ring, YELLOW in the grey bubble) and reverts on climb-out — one card per plane, never two
+    let cls=cfg.cls?cfg.cls(f,inside):'', det=null, headOv=null, subOv=null, icOv=null, hazardOv=null;
+    // LOW AIRCRAFT: a low plane's own card BECOMES the alert and reverts on climb-out —
+    // one card per plane, never two. Colour = the gate math: RED only when it GROUNDS
+    // the chart (the NOW column reds with it); capping / grey-bubble = YELLOW heads-up
     const bi=cfg.air?breachInfo.get(f):null;
     if(bi){
       icOv=acIcon(f); hazardOv=true; headOv='LOW AIRCRAFT';   // ✈️/🚁, same as every card
-      cls=bi.inRange?'danger':'alert';                        // red inside 1 mi · yellow in the bubble
+      cls=bi.grounds?'danger':'alert';
       subOv='<span style="color:'+AIRCRAFT_COLOR+'">'+acTail(f,12,'aircraft')+'</span>';
       det=bi.label;
     }
@@ -1227,8 +1230,8 @@ function sitrepTick(){
   // -- PERMANENT LOCATION CARD — your live GPS fix, always shown so position status is never
   //    ambiguous (there is no map to glance at). Pre-lock is red (above). After lock:
   //    • good accuracy (≤ ACC_WARN_M) → neutral card at the very bottom (wxTail)
-  //    • significantly inaccurate (> ACC_WARN_M) → yellow + hazard, pushed into cards so it
-  //      appears in the yellow-alert section at the top and can raise the overall verdict.
+  //    • significantly inaccurate (> ACC_WARN_M) → yellow, promoted into the alert section
+  //      (the gps gate cautions the verdict from the SAME threshold — this card is its view).
   const accM = USER.acc;
   const accPoor = accM != null && accM > ACC_WARN_M;
   const locCard = mkCard(
@@ -1244,31 +1247,12 @@ function sitrepTick(){
   if (accPoor) cards.push(locCard);   // promote to yellow-alert section at top
   else wxTail.push(locCard);          // good lock stays at the bottom
 
-  // verdict severity: 0 go (green) · 1 caution (yellow) · 2 no-go (red). Driven by the
-  // flyability NOW column FIRST — any grounding value/condition reds it, any reduced ceiling
-  // (below the 400 ft cap) OR any unverified gate input (failed airspace / Kp / radar /
-  // weather pull — unknown ≠ clear) yellows it — then raised further by any hazard card
-  // (low aircraft / severe warning / restriction) in range.
-  let titleSev=0;
-  const g0=FLY.detail&&FLY.detail.grid&&FLY.detail.grid[0];
-  if(g0) titleSev=g0.grounded?2:(g0.maxFly<SPEC.regFt?1:0);
-  // required data not yet pulled/printed → RED grounding (can't confirm ⇒ don't fly), even
-  // before the first chart render; a post-load transient blip is yellow caution (fail-open)
-  if(flyNeverVerified()) titleSev=2;
-  else if(FLY.detail&&flyUnknown().length) titleSev=Math.max(titleSev,1);
-  cards.forEach(c=>{ if(c.hazard) titleSev=Math.max(titleSev,c.cls==='danger'?2:c.cls==='alert'?1:0); });
-  // the VISIBLE verdict is the CLOCK colour (top-left of the chart: green / yellow / red);
-  // renderClock() reads verdictSeverity. Also stamp the hidden #sit-title for tests/parity.
-  verdictSeverity=titleSev;
-  renderClock();
-  { const t=$('#sit-title'); if(t){
-    t.classList.remove('warn','alert');
-    if(titleSev>=2) t.classList.add('warn'); else if(titleSev>=1) t.classList.add('alert');
-  }}
+  // The verdict was computed at the TOP of this tick (gate table fold) — cards never
+  // vote. What remains here is pure RANKING.
   // CARD CATEGORIES, top → bottom: 0 red warning · 1 yellow alert · 2 general objects (every
   // non-promoted aircraft / airspace / etc within 25 mi). A card is PROMOTED out of general
-  // only by a real hazard (hazard flag + colour) — a plain yellow plane (e.g. military) stays
-  // general. WITHIN each category cards sort by RANGE (km ascending); area-wide cards (data /
+  // only by its hazard flag + colour (ranking metadata) — a plain plane stays general.
+  // WITHIN each category cards sort by RANGE (km ascending); area-wide cards (data /
   // FAA / Kp / promoted weather — no km) head their category. WEATHER (wxTail) is the
   // final category, rendered after all of the above.
   const catOf=c=>(c.hazard&&c.cls==='danger')?0:(c.hazard&&c.cls==='alert')?1:2;
@@ -1515,25 +1499,36 @@ async function sampleRadarPrecip(lat,lon,rngMi){
   return found;
 }
 
-// ---- TRFC: traffic-imposed NOW-column ceiling [ft]. A plane at AGL A pins the highest
-// usable band to the highest 50-ft step strictly below (A − FAA_SEP_FT); the most
-// restrictive plane wins (Infinity = none, < 0 grounds). Scans only the 1 mi range —
-// grey-ring aircraft are tracked as cards but don't cap the chart until in range.
-function flyTrafficCeilFt(){
-  const c={lat:USER.lat,lng:USER.lon};
-  const cross=groundElevFt(c.lat,c.lng);   // ft AMSL at your position, fallback ground
-  const near=planesNear(c.lat,c.lng,RNG.mi*MI_TO_KM);
-  ensureGroundElev([[c.lat,c.lng],...near.filter(a=>a.alt<AGL_CAND_MAX_FT).map(a=>[a.pt[1],a.pt[0]])]);
-  let ceil=Infinity;
+// ---- TRAFFIC — the ONE assessment shared by the chart's TRFC gate, the traffic gate in
+// the verdict table, and the LOW AIRCRAFT cards, so they can never disagree. Scans the
+// GREY bubble (5 mi) for planes under the warning altitude; each is tagged inRange
+// (inside the 1 mi RED ring) and, in range, imposes a NOW ceiling: the highest 50-ft
+// band STRICTLY below (plane AGL − FAA_SEP_FT). The most restrictive plane wins
+// (ceilFt Infinity = none, < 0 = grounds); grounds is also tagged per plane so a
+// card's colour derives from the same math as the chart column. ----
+function assessTraffic(){
+  if(USER.lat==null) return {ceilFt:Infinity,low:[]};
+  const lat=USER.lat,lon=USER.lon;
+  const cross=groundElevFt(lat,lon);   // ft AMSL at your position, fallback ground
+  const near=planesNear(lat,lon,GREY_MI*MI_TO_KM);
+  ensureGroundElev([[lat,lon],...near.filter(a=>a.alt<AGL_CAND_MAX_FT).map(a=>[a.pt[1],a.pt[0]])]);
+  const rKm=RNG.mi*MI_TO_KM;
+  let ceilFt=Infinity; const low=[];
   near.forEach(a=>{
-    const {agl}=planeAglFt(a,cross);   // per-plane terrain, QNH-corrected MSL
-    if(agl>=WARN_AGL_FT) return;       // too high to intrude on the 0–400 band
-    const safeFloor=agl-FAA_SEP_FT;    // drone must stay clear of (below) this
-    // highest 50-ft band STRICTLY below the sep floor (−50 = none → grounds)
-    let top=-50; for(const ft of ALTS){ if(ft<safeFloor){ top=ft; break; } }
-    if(top<ceil) ceil=top;
+    const {ground,agl}=planeAglFt(a,cross);   // per-plane terrain, QNH-corrected MSL
+    if(agl>=WARN_AGL_FT) return;              // too high to intrude on the 0–400 band
+    const inRange=havKm(lat,lon,a.pt[1],a.pt[0])<=rKm;
+    let grounds=false;
+    if(inRange){
+      const safeFloor=agl-FAA_SEP_FT;         // drone must stay clear of (below) this
+      // highest 50-ft band STRICTLY below the sep floor (−50 = none → grounds)
+      let top=-50; for(const ft of ALTS){ if(ft<safeFloor){ top=ft; break; } }
+      if(top<ceilFt) ceilFt=top;
+      grounds=top<0;
+    }
+    low.push({f:a.f,agl,ground,inRange,grounds});
   });
-  return ceil;
+  return {ceilFt,low};
 }
 
 // ---- state + render pipeline ----
@@ -1545,7 +1540,8 @@ const FLY={
   // Every gate starts UNVERIFIED (true), not clear — so the app never opens falsely-green.
   // Each clears as its feed pulls + prints; while a gate has NEVER loaded the verdict
   // GROUNDS RED (can't confirm → don't fly) and a red DATA card names it, immediately (no
-  // grace). Once a feed has loaded once, a later blip reverts to yellow caution (fail-open).
+  // grace). Once a feed has loaded, a later blip cautions (yellow) once it outlasts the
+  // ONE grace window (feedTier) — the verdict and the DATA card change colour together.
   err:{om:true,kp:true,asp:true,radar:true},
 };
 // ---- UNIFIED DATA FRESHNESS ----
@@ -1572,9 +1568,81 @@ const gateTier=k=>feedTier(flyEver[k], FLY.err[k], flyErrSince[k]);
 const layerTier=id=>{ const st=LAYER_STATE[id]||{}; return feedTier(true, st.failSince>0, st.failSince); };
 // verdict red while any required GATE has never verified — keyed to the authoritative gates
 function flyNeverVerified(){ return Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='red'); }
-// gates currently errored (immediate, no grace) — the quiet yellow on the NOW header + verdict
-function flyUnknown(){ return Object.keys(FLY_ERR_LABEL).filter(k=>FLY.err[k]).map(k=>FLY_ERR_LABEL[k]); }
 window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // debug/test handle
+
+/* =====================================================================
+   VERDICT GATE TABLE — the ONE point of verdict logic. Every condition that can colour
+   the NOW verdict is scored here, exactly once: 0 clear · 1 caution · 2 no-go.
+   verdictSeverity is a pure fold (max) over this table; everything else is a VIEW —
+   the chart is the altitude × hour projection of the ceiling gates, and cards carry
+   info + ranking (a card NEVER votes on the verdict).
+   Chart-consistency rule: an altitude-expressible gate scores from the same values the
+   chart paints, so the NOW colour can never contradict the cells; only conditions the
+   chart cannot express (a warning polygon, a nearby zone, GPS, data health) may raise
+   the verdict beyond the chart's own state.
+   ===================================================================== */
+const SEV_CLS=['','alert','danger'];   // gate severity → card display class
+// NWS warning severity — the ONE classifier, used by the nws gate AND the card colour
+const nwsSev=f=>/Extreme|Severe/i.test(f.properties.severity)?2:1;
+// a hazard zone (hard/conditional airspace, or NPS land) within the 1 mi ring: a
+// PROXIMITY caution — being NEAR a zone is legal; being INSIDE one is g.restrict's no-go.
+// (A defense TFR in range still reds via g.faa — its gate query grounds the ceiling.)
+function zonesNearSev(){
+  if(USER.lat==null) return 0;
+  const rKm=RED_MI*MI_TO_KM;
+  const near=f=>{ if(pointInFeature(f,USER.lon,USER.lat)) return true;
+    const ne=nearestEdge(f,USER.lon,USER.lat); return !!ne&&ne.km<=rKm; };
+  if(featsIn('airspace').some(f=>(f.properties.sev==='hard'||f.properties.sev==='caution')&&near(f))) return 1;
+  if(featsIn('nps').some(near)) return 1;
+  return 0;
+}
+// worst NWS warning in play — covering you, or its edge within the 1 mi ring
+function nwsGateSev(){
+  if(USER.lat==null) return 0;
+  const rKm=RED_MI*MI_TO_KM;
+  let sev=0;
+  featsIn('nws').forEach(f=>{ if(sev===2) return;
+    if(pointInFeature(f,USER.lon,USER.lat)){ sev=Math.max(sev,nwsSev(f)); return; }
+    const ne=nearestEdge(f,USER.lon,USER.lat);
+    if(ne&&ne.km<=rKm) sev=Math.max(sev,nwsSev(f));
+  });
+  return sev;
+}
+// takes the shared traffic assessment (assessTraffic) so gate and cards read one result
+function evalGates(tr){
+  const d=FLY.detail, wn=d&&d.wxNow;
+  const capSev=c=>c==null?0:c<0?2:c<SPEC.regFt?1:0;   // ceiling → severity (Infinity → 0)
+  const g={};
+  // GPS: no fix = nothing can be briefed (no-go); poor accuracy = caution
+  g.gps=USER.lat==null?2:(USER.acc!=null&&USER.acc>ACC_WARN_M?1:0);
+  // DATA: a required gate feed never verified grounds (unknown ≠ clear); a feed stale
+  // past the ONE grace window (feedTier) cautions. The verdict and the DATA card change
+  // colour TOGETHER now — the old immediate "quiet yellow" (an unexplained NOW colour
+  // change up to 35 s before its card) is retired.
+  g.data=flyNeverVerified()?2
+    :(Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='yellow')||layerTier('airspace')==='yellow')?1:0;
+  // weather gates — the same NOW values the chart paints (wn = flyComputeDetail's wxNow)
+  g.gust=wn&&wn.gust?2:0;
+  g.vis =wn&&wn.vis?2:0;
+  g.wind=wn?capSev(wn.windCeilFt):0;
+  g.cloud=wn?capSev(wn.cloudCapFt):0;
+  g.precip=wn?(wn.precip?2:wn.precipInbound?1:0):0;
+  // Kp: ONE gate, both thresholds — storm grounds, elevated cautions
+  const kpv=d?d.kpNow:null;
+  g.kp=kpv==null?0:kpv>=SPEC.kpGnd?2:kpv>=SPEC.kpCaut?1:0;
+  // FAA: LAANC/defense ceiling (unknown scores 0 here — g.data carries the unknown)
+  g.faa=(d&&!d.aspUnknown)?capSev(d.aspCapFt):0;
+  // traffic: a GROUNDING plane reds (the chart NOW column reds with it); a capping or
+  // in-bubble low plane cautions — the chart shows the cap, so the NOW colour never
+  // reads no-go over flyable green cells
+  g.traffic=tr.ceilFt<0?2:(tr.ceilFt<SPEC.regFt||tr.low.length?1:0);
+  // hard restriction UNDER you (the chart grounds every column) vs zones merely NEAR
+  g.restrict=flyRestriction()?2:0;
+  g.zones=zonesNearSev();
+  // NWS warning here: severe/extreme = no-go, any other warning = caution
+  g.nws=nwsGateSev();
+  return g;
+}
 
 // Hard airspace restriction under the GPS position, from the loaded map layer: a Prohibited
 // (PROH) or national-security UAS (NSUF) zone that grounds the chart. Defense zones are
@@ -1599,9 +1667,9 @@ function flyRestriction(){
 function flyComputeDetail(){
   const {aloft,kp,asp}=FLY.data;
   // FAA gate unknown (query failing, no usable cache) → the ceiling math fails OPEN
-  // (cap 400). The unknown is surfaced by the VERDICT — the NOW header yellows via
-  // flyUnknown() — and by the DATA card that names the feed; the grid itself stays
-  // strictly binary (green fly / red can't-fly). Colour logic lives on NOW alone.
+  // (cap 400). The unknown is surfaced by the VERDICT — the data gate in evalGates —
+  // and by the DATA card that names the feed; the grid itself stays strictly binary
+  // (green fly / red can't-fly). Colour logic lives on NOW alone.
   const aspCapFt=asp==null?SPEC.regFt:(asp.ceilFt<=0?-1:Math.min(SPEC.regFt,asp.ceilFt));
   // winds arrive in MPH now, so no conversion — gate at the mph limit, print mph
   const atLim=mph=>mph!=null&&Math.round(mph)>=LIM.wind;
@@ -1625,7 +1693,7 @@ function flyComputeDetail(){
     }
     return v!=null?v:kp.rows[0].kp;
   };
-  const trafficCeil=flyTrafficCeilFt();   // NOW-only manned-traffic ceiling (Infinity = none)
+  const trafficCeil=assessTraffic().ceilFt;   // NOW-only manned-traffic ceiling (Infinity = none)
   const restrict=flyRestriction();   // a hard Prohibited/security zone grounds every column
   let wxNow=null;   // NOW-column weather-gate diagnostics for the weather card
   const grid=cols.map((c,n)=>{
@@ -1800,7 +1868,7 @@ async function flyRefresh(){
     const aloft=await pAloft;
     if(aloft){
       // paint now with the last-good gates (fresh ones repaint below); a gate with no
-      // value yet stays flagged unknown, so the NOW header yellows rather than reading 400
+      // value yet stays flagged unknown for the DATA gate (unknown ≠ clear)
       FLY.data={lat:base.lat,lon:base.lon,aloft,
         kp:(FLY.data&&FLY.data.kp)||null, asp:(FLY.data&&FLY.data.asp)||null};
       FLY.err.om=false; FLY.err.asp=FLY.data.asp==null; FLY.err.kp=FLY.data.kp==null;
@@ -1853,8 +1921,9 @@ async function flyRefresh(){
 /* =====================================================================
    7. CLOCK + VERDICT COLOUR — the top-left clock is plain white (live local time, blinking
    colon). The overall can-I-fly verdict is shown as the COLOUR of the NOW column header:
-   green = go, yellow = caution, red = no-go. sitrepTick computes verdictSeverity (0/1/2);
-   renderClock ticks the time + repaints the NOW colour every second.
+   green = go, yellow = caution, red = no-go. sitrepTick folds the gate table (evalGates)
+   into verdictSeverity (0/1/2); renderClock ticks the time + repaints the NOW colour
+   every second.
    ===================================================================== */
 const VERDICT_CLASS=['go','caution','nogo'];   // CSS class per severity 0/1/2
 // born RED (unknown ≠ clear): nothing is verified before the first sitrepTick, so the

@@ -15,16 +15,19 @@ flowchart LR
   USER --> PULSE{"pulse()<br/>every 5 s"}
   PULSE --> FEEDS["FETCH (keyless, CORS-open)<br/>aircraft · airspace · NPS · NWS · SPC<br/>weather · winds-aloft · Kp · radar · elevation"]
   FEEDS --> STORE[("STORE<br/>LAYER_STATE[id].features<br/>FLY.data · WX")]
+  STORE --> GATES["evalGates()<br/>→ gate table (0/1/2)"]
   STORE --> CHART["flyComputeDetail()<br/>→ can-I-fly grid"]
   STORE --> SITREP["sitrepTick()<br/>→ SITREP cards"]
-  CHART --> CLOCK["verdict → clock + NOW colour"]
+  GATES --> NOW["verdict = max(gates)<br/>→ NOW header colour"]
   CHART --> BOARD["chart grid (400→sfc × NOW..+3h)"]
   SITREP --> CARDS["ranked cards"]
 ```
 
-**The decision logic is concentrated in three functions** (they read the store, never fetch):
-`flyComputeDetail()` (the chart + verdict), `sitrepTick()` (the cards), `planesNear()` (the
-traffic net). Everything else fetches or renders.
+**Verdict logic lives in ONE place — the gate table.** `evalGates()` scores every condition
+that can colour the verdict, exactly once (0 clear · 1 caution · 2 no-go); the verdict is a
+pure `max()` fold over it. Everything else is a view: `flyComputeDetail()` projects the
+ceiling gates onto the altitude × hour chart, `sitrepTick()` renders cards (info + ranking —
+a card never votes), and `assessTraffic()` is the one traffic assessment they all share.
 
 ---
 
@@ -91,12 +94,19 @@ on a later blip (fail-safe, `feedTier()`). The chart cells themselves stay stric
 
 ## Verdict colour (clock + NOW header)
 
-| Severity | Colour | Meaning | Set by |
-|---|---|---|---|
-| 0 | 🟢 green | GO | nothing binds |
-| 1 | 🟡 yellow | CAUTION | ceiling < 400, Kp 5–6, unverified feed, or a yellow hazard card |
-| 2 | 🔴 red | NO-GO | grounded, an unverified required feed, or a red hazard card |
+`verdictSeverity = max` over the **gate table** (`evalGates()`) — the single point of
+verdict logic. Each gate scores 0/1/2; cards display a gate's info and rank by its
+severity, but never vote.
 
+| Severity | Colour | Meaning | Gates that score it |
+|---|---|---|---|
+| 0 | 🟢 green | GO | nothing scores |
+| 1 | 🟡 yellow | CAUTION | ceiling < 400 (FAA / wind / cloud / traffic) · Kp 5–6 · precip within 5 mi · low aircraft (capping or in the bubble) · zone nearby · non-severe warning · poor GPS · stale feed |
+| 2 | 🔴 red | NO-GO | any grounding gate (the chart NOW column reds with it) · severe/extreme warning here · inside a prohibited / security / park zone · required feed never verified · no GPS fix |
+
+A gate may exceed the chart's state only for conditions the chart can't express (a warning
+polygon, a nearby zone, GPS, data health); altitude gates score from the very values the
+chart paints, so the NOW colour never reads no-go over flyable green cells.
 The clock itself is white; the **NOW column header** carries the colour.
 
 ---
@@ -105,8 +115,8 @@ The clock itself is white; the **NOW column header** carries the colour.
 
 | # | Category | Contents | Sort |
 |---|---|---|---|
-| 1 | Red warning | low aircraft < 1 mi · hard airspace (defense/prohibited/security) · FAA no-fly · NPS · Kp G3+ · weather groundings | by range |
-| 2 | Yellow alert | low aircraft 1–5 mi · restricted/stadium airspace · reduced ceiling · Kp 5–6 · poor GPS · unverified feed | by range |
+| 1 | Red warning | grounding aircraft (≤ 500 ft AGL in the 1 mi ring) · severe warning · INSIDE hard airspace / NPS · FAA no-fly · Kp G3+ · weather groundings | by range |
+| 2 | Yellow alert | low aircraft (capping, or out to 5 mi) · zones nearby (incl. hard) · restricted/stadium · reduced ceiling · Kp 5–6 · poor GPS · stale feed | by range |
 | 3 | General | every non-promoted object < 25 mi — aircraft (incl. military) + airspace, interleaved | by range |
 | 4 | Weather | SPC outlook, then general conditions | fixed |
 | 5 | Location | GPS lock / accuracy | last |
