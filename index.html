@@ -645,7 +645,11 @@ function pulse(force){
   flyRefresh(); loadWeather(force); refreshRadar();
   refreshBase=Date.now();   // restart the auto-refresh countdown from zero
 }
-function refreshTick(){ if(Date.now()-refreshBase>=REFRESH_S*1000) pulse(); }
+// The 1 s heartbeat fires a data pulse every REFRESH_S — but NOT while the page is hidden
+// (backgrounded tab / locked phone): there's no point fetching aircraft, weather and airspace
+// that no one can see, and it wastes battery + mobile data. Coming back to a visible page
+// pulses at once (see the visibilitychange handler in boot) so you never read stale data.
+function refreshTick(){ if(!document.hidden && Date.now()-refreshBase>=REFRESH_S*1000) pulse(); }
 
 // initialise per-layer runtime state (features + fetch bookkeeping). There is no map, so
 // nothing is drawn — the loaders just populate LAYER_STATE[id].features for the SITREP.
@@ -1836,6 +1840,9 @@ function boot(){
   document.addEventListener('contextmenu',e=>e.preventDefault());
   ['gesturestart','gesturechange','gestureend'].forEach(ev=>
     document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+  // Returning to a visible page → refresh immediately (data went stale while hidden), then
+  // the heartbeat resumes its normal cadence. While hidden, refreshTick pauses the pulse.
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pulse(); });
   initLayers();
   // location-INDEPENDENT feeds load now (military aircraft, NWS warnings, SPC outlook);
   // position-scoped feeds wait for the first fix, which kicks them via setUserFix().
