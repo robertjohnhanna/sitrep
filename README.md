@@ -12,7 +12,7 @@ decided.** For reference only.
 
 ```mermaid
 flowchart LR
-  GPS["GPS watch — watchPosition<br/>→ USER lat / lon / acc"] --> PULSE["pulse() every 5 s → FETCH (keyless, CORS-open)<br/>aircraft · airspace · NPS · NWS · SPC · weather<br/>winds-aloft · Kp · radar · elevation"]
+  GPS["GPS watch — watchPosition<br/>→ USER lat / lon / acc"] --> PULSE["pulse() every 5 s → FETCH (keyless, CORS-open)<br/>aircraft · airspace · NPS · NWS · weather<br/>winds-aloft · Kp · radar · elevation"]
   PULSE --> STORE[("STORE<br/>LAYER_STATE[id].features<br/>FLY.data · WX")]
   STORE --> GATES["evalGates()<br/>→ gate table (0/1/2)"]
   STORE --> CHART["flyComputeDetail()<br/>→ can-I-fly grid"]
@@ -34,17 +34,16 @@ a card never votes), and `assessTraffic()` is the one traffic assessment they al
 
 | Feed / call | Endpoint | Provides | Scope | Refresh |
 |---|---|---|---|---|
-| `nearair` | airplanes.live `/point/…` · fallback adsb.fi `/lat/…/dist/…` (own route + shape) | ALL aircraft (civil + military, no distinction) | ~25 mi around you | 5 s |
+| `nearair` | airplanes.live `/point/…` **+** adsb.fi `/lat/…/dist/…` (own route + shape each) — both queried every pull, contacts **merged by icao24/hex, newest report wins** | ALL aircraft (civil + military, no distinction) | ~25 mi around you | 5 s |
 | `nws` | api.weather.gov `/alerts/active?point=` | active **warnings** covering you | your point | 15 s |
-| `spc` | spc.noaa.gov `day1otlk_*` | severe-wx / tornado outlook | US | 15 min |
 | `airspace` | FAA ArcGIS `services6…` (5 layers) | Class B/C/D, TFR, SUA, NSUFR, stadiums | 25 mi box | 15 min + on move |
 | `nps` | NPS ArcGIS `services1…` | national-park lands (no-fly) | 25 mi box | on move |
-| `getAloft` | open-meteo `/v1/forecast` | winds to ~590 ft + gust + dir + cloud + vis + precip-prob (NOW..+3h) | point | ~15 s |
+| `getAloft` | open-meteo `/v1/forecast` | winds to ~590 ft + gust + dir + cloud + vis (NOW..+3h) | point | ~15 s |
 | `loadWeather` | open-meteo `/v1/forecast` (current) | temp / feels / code / wind / hi-lo | point | ~5 min |
 | `getKp` | swpc.noaa.gov Kp forecast | planetary Kp (3-hr bins) | global | ~3 min |
 | `getLaancCeil` | FAA ArcGIS LAANC grid | drone grid ceiling | 1 mi point | cached 6 h |
 | `getDefense` | FAA defense-TFR areas | hard no-fly (ceiling → 0) | 1 mi point | ~10 min |
-| `sampleRadarPrecip` | Iowa Mesonet NEXRAD tiles | reflectivity (sampled off-screen) | 1 mi & 5 mi | 60 s window |
+| `sampleRadarPrecip` | Iowa Mesonet NEXRAD tiles | reflectivity (sampled off-screen) | 5 mi | 60 s window |
 | `ensureGroundElev` | open-meteo `/v1/elevation` | ground elevation for AGL | per ~0.7 mi cell | on demand |
 
 Winds are requested straight in **mph** — the unit shown and gated on — so no wind conversion
@@ -109,13 +108,12 @@ grounded  ⇢  capFt < 0   OR   any grounding gate below
 | **Gust** | surface gust | ≥ 27 mph | grounds |
 | **Visibility** | surface vis | < 3 SM | grounds |
 | **Kp** | SWPC Kp | ≥ 7 (G3+) | grounds |
-| **Precip (NOW)** | NEXRAD radar | echo ≤ 1 mi | grounds NOW |
-| **Precip (+1..+3h)** | forecast probability | hourly PoP ≥ 80% | grounds that column |
 | **Restriction** | prohibited · security · NPS **under you** | inside the zone | grounds all hours |
 
 The cells are strictly binary — **no yellow ever lives in the grid**. Softer conditions
 (Kp 5–6, precip within 5 mi, a plane that only caps, an unverified feed) color the
-**verdict** alone, below.
+**verdict** alone, below. **Precip never grounds** — a radar echo anywhere inside the 5 mi
+buffer ring raises a yellow PRECIPITATION NEARBY alert (card + verdict caution), nothing more.
 
 **Method notes.** Traffic AGL = QNH-corrected ADS-B pressure altitude − ground elevation
 **under that plane** (cached ~0.7 mi cells; unknown terrain fails toward *not* flagging).
@@ -126,25 +124,11 @@ speckle), one fresh mosaic per 60 s window; tile loads hard-timeout at 8 s so a 
 connection can never wedge the refresh cycle (every other fetch is already abort-bounded). Cloud base = the lowest pressure deck with
 ≥12% cover, min'd with an LCL estimate from the temp/dew-point spread.
 
-**Precip: NOW vs future.** The NOW column is live NEXRAD — ground truth, and the only
-precip that feeds the verdict. The +1/+2/+3h columns are a *planning* signal from the
-hourly forecast probability (`PRECIP_POP_PCT`, default **80%**), and they ground the chart
-column without ever touching the verdict.
-
-The threshold sits high on purpose. PoP is closer to *areal coverage × conditional
-probability* than "chance it rains on **you**" — so a scattered-convective afternoon can
-hold 50–60% for hours while your launch point stays dry, and a low bar would ground the
-future row all day and never verify (cry-wolf, which kills a planning row's credibility).
-80% clears that scattered "maybe" band and fires on organized/likely rain. It's not pushed
-to 90+ because a planning row lives on **lead time** — as a front approaches, PoP ramps
-40→70→90, and warning at 80 leaves runway to act, where 90 warns only once it's nearly a
-lock. The fail-safe imperative is carried by the NOW column (re-checked against live radar
-at launch), so the future row is tuned for a believable, actionable heads-up. One knob.
-
 **Unknown ≠ clear** (`feedTier()`, one classifier for every feed): a required feed that has
 **never loaded** grounds the verdict (red) immediately — no grace; a feed that *was* loaded
 and fails past a ~35 s grace window cautions (yellow). The verdict and the DATA card change
-color together, and last-good data keeps painting throughout.
+color together, and last-good data keeps painting throughout. Radar is the exception: it
+only powers the precip-nearby alert, so its outage can degrade to yellow but never grounds.
 
 ---
 
@@ -158,7 +142,7 @@ severity, but never vote.
 |---|---|---|---|
 | 0 | 🟢 green | GO | nothing scores |
 | 1 | 🟡 yellow | CAUTION | reduced ceiling < 400 (FAA / wind aloft / cloud) · a plane that caps (in the ring) or any low plane out to 5 mi · Kp 5–6 · precip within 5 mi · a zone nearby (incl. hard) · non-severe warning here · poor GPS · stale feed |
-| 2 | 🔴 red | NO-GO | **a grounding chart gate** — gust · vis · Kp G3+ · precip ≤ 1 mi · FAA no-fly · in-ring plane ≤ 500 ft AGL · inside a prohibited / security / park zone (the NOW column reds with each) — **plus** what the chart can't show: severe/extreme warning here · required feed never verified · no GPS fix |
+| 2 | 🔴 red | NO-GO | **a grounding chart gate** — gust · vis · Kp G3+ · FAA no-fly · in-ring plane ≤ 500 ft AGL · inside a prohibited / security / park zone (the NOW column reds with each) — **plus** what the chart can't show: severe/extreme warning here · required feed never verified · no GPS fix |
 
 Altitude gates score from the very values the chart paints, so the NOW color never reads
 no-go over flyable green cells. A gate exceeds the chart's own state only for conditions the
@@ -174,7 +158,7 @@ white; the **NOW column header** carries the color. All times shown are device-l
 | 1 | Red warning | grounding aircraft (≤ 500 ft AGL in the 1 mi ring) · severe warning · INSIDE hard airspace / NPS · FAA no-fly · Kp G3+ · weather groundings · required feed not loaded | by range |
 | 2 | Yellow alert | low aircraft (capping, or out to 5 mi) · zones nearby (incl. hard) · restricted/stadium · reduced ceiling · Kp 5–6 · poor GPS · stale feed | by range |
 | 3 | General | every non-promoted object < 25 mi — aircraft + airspace, interleaved | by range |
-| 4 | Weather | SPC outlook, then general conditions | fixed |
+| 4 | Weather | general conditions | fixed |
 | 5 | Location | GPS lock / accuracy | last |
 
 Object colors are **identity only** (violet no-fly · cyan conditional · blue/magenta controlled ·
@@ -186,8 +170,8 @@ steel advisory airspace; white aircraft) — green/yellow/red is reserved for th
 
 | Ring | Radius | Role |
 |---|---|---|
-| **Operational** (red) | 1 mi | FAA point query · traffic caps the chart · low-aircraft **grounds → red** (≤ 500 ft AGL) else caps → yellow · **precip grounds** |
-| **Buffer** (yellow) | 5 mi | traffic net · any low aircraft → **yellow** heads-up · **precip nearby** (yellow) |
+| **Operational** (red) | 1 mi | FAA point query · traffic caps the chart · low-aircraft **grounds → red** (≤ 500 ft AGL) else caps → yellow |
+| **Buffer** (yellow) | 5 mi | traffic net · any low aircraft → **yellow** heads-up · **precip nearby** (yellow — the only precip signal; never grounds) |
 | **Data** | 25 mi | everything pulled + carded on the SITREP |
 
 ---
