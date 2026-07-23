@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="canifly">
-<meta name="description" content="canifly — keyless drone preflight: can I fly here, now, and how high? GPS-located: live weather, winds aloft, FAA airspace, radar and traffic.">
+<meta name="description" content="canifly — keyless drone preflight: can I fly here, now, and how high? GPS-located: live winds aloft, FAA airspace and traffic.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%A9%3C/text%3E%3C/svg%3E">
 <title>canifly</title>
 
@@ -244,16 +244,9 @@ function pointInFeature(f,lon,lat){   // inside the outer ring and not in a hole
 }
 const escapeHtml =s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-// 1. radar tile source — NEXRAD mosaic (Iowa State Mesonet); never drawn, only SAMPLED for the precip-nearby alert
-const RADAR_TILE_URL='https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png';
-const RADAR_BUST_SECONDS=60;   // one fresh mosaic per window (the source updates ~5 min)
-const currentRadarBust=()=>Math.floor(Date.now()/(RADAR_BUST_SECONDS*1000));
-let radarBustWindow=currentRadarBust();
-function refreshRadar(){ const b=currentRadarBust(); if(b!==radarBustWindow) radarBustWindow=b; }   // new window = sampler memo invalidated
-
 window.__sitrep={};   // debug/test handle (modules attach as the app wires up)
 
-// 2. data feeds — {id, refresh[s], viewport?, loader → GeoJSON FC (null = keep current)}; features are
+// 1. data feeds — {id, refresh[s], viewport?, loader → GeoJSON FC (null = keep current)}; features are
 // STORED in LAYER_STATE for the SITREP/chart to read (no map). viewport = position-scoped, refetched on
 // move. A loader THROWS on failure → the runtime keeps last-good data and retries on a short backoff.
 const LAYERS=[];
@@ -264,23 +257,6 @@ defLayer({   // AIRCRAFT — one layer, one /point pull, every contact civil + m
   id:'nearair', refresh:REFRESH_S,
   viewport:true,   // refetched when you move + every pulse
   loader: async ()=>({type:'FeatureCollection',features:acFeatures(await adsbViewport())})
-});
-
-defLayer({   // NWS active WARNINGS covering your point (?point= filters server-side; no watches/advisories)
-  id:'nws', refresh:15, viewport:true,
-  loader: async ()=>{
-    const j=await getJSON('https://api.weather.gov/alerts/active?point='
-      +USER.lat.toFixed(3)+','+USER.lon.toFixed(3),{timeout:20000});
-    const feats=[];
-    (j.features||[]).forEach(f=>{
-      const p=f.properties||{}, ev=(p.event||'').trim();
-      if(!/warning$/i.test(ev)) return;   // warnings only
-      if(!f.geometry) return;             // needs a polygon for the range test
-      feats.push({type:'Feature',geometry:f.geometry,properties:{
-        event:ev,severity:p.severity||'',area:p.areaDesc||'',ends:p.ends||p.expires||''}});
-    });
-    return {type:'FeatureCollection',features:feats};
-  }
 });
 
 function floorFt(v){   // airspace floor → ft: SFC/blank → 0 · FLnnn → nnn×100 · number → itself · junk → 0 (conservative)
@@ -350,7 +326,7 @@ defLayer({   // NPS lands — drones can't launch/land/operate in a unit → har
   }
 });
 
-// 3. feed runtime — per-feed fetch state + the unified 5 s pulse
+// 2. feed runtime — per-feed fetch state + the unified 5 s pulse
 const LAYER_STATE={};
 let sitrepRefreshT=null;
 function scheduleSitrep(){ clearTimeout(sitrepRefreshT); sitrepRefreshT=setTimeout(()=>{   // debounce a burst of updates to one recompute
@@ -443,7 +419,7 @@ function pulse(force){   // ONE pulse drives every data kick; force = pull every
     }
     runLayer(cfg);
   });
-  flyRefresh(); loadWeather(force); refreshRadar();   // chart inputs self-throttle on their own natural cadences
+  flyRefresh();   // chart inputs self-throttle on their own natural cadences
   refreshBase=Date.now();
 }
 function refreshTick(){ if(!document.hidden && Date.now()-refreshBase>=REFRESH_S*1000) pulse(); }   // hidden page = pulse paused (resumes + refires on return)
@@ -455,99 +431,24 @@ function initLayers(){   // per-layer runtime state (features + fetch bookkeepin
   });
 }
 
-// 4. weather card feed — Open-Meteo current conditions (Kp is NOT fetched here; the card reads the chart's kpNow)
-let WX=null, wxLat=null, wxLon=null, wxAt=0, wxBusy=false;
-const WMO={0:['☀️','clear'],1:['🌤️','mostly clear'],2:['⛅','partly cloudy'],3:['☁️','overcast'],   // WMO code → emoji + condition
-  45:['🌫️','fog'],48:['🌫️','icy fog'],
-  51:['🌦️','light drizzle'],53:['🌦️','drizzle'],55:['🌧️','heavy drizzle'],56:['🌧️','freezing drizzle'],57:['🌧️','freezing drizzle'],
-  61:['🌧️','light rain'],63:['🌧️','rain'],65:['🌧️','heavy rain'],66:['🌧️','freezing rain'],67:['🌧️','freezing rain'],
-  71:['🌨️','light snow'],73:['🌨️','snow'],75:['🌨️','heavy snow'],77:['🌨️','snow grains'],
-  80:['🌦️','light showers'],81:['🌧️','showers'],82:['⛈️','heavy showers'],85:['🌨️','snow showers'],86:['🌨️','snow showers'],
-  95:['⛈️','thunderstorm'],96:['⛈️','storm, hail'],99:['⛈️','storm, hail']};
-async function loadWeather(force){
-  if(wxBusy || USER.lat==null) return;   // GPS-located only
-  if(!force && WX && wxLat!=null && havMi(wxLat,wxLon,USER.lat,USER.lon)<WX_MOVE_MI && Date.now()-wxAt<300000) return;   // ladder distance + 5 min age
-  wxBusy=true;
-  try{
-    const u=`https://api.open-meteo.com/v1/forecast?latitude=${USER.lat.toFixed(3)}&longitude=${USER.lon.toFixed(3)}`
-      +`&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m`
-      +`&daily=temperature_2m_max,temperature_2m_min`
-      +`&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1`;   // wind straight in mph — one rounding, same as the chart's SFC wind
-    const d=await getJSON(u,{timeout:12000});
-    const cur=d.current||{}, day=d.daily||{};
-    WX={tempF:cur.temperature_2m, feelsF:cur.apparent_temperature, code:cur.weather_code,
-        windMph:cur.wind_speed_10m, windDir:cur.wind_direction_10m,
-        hiF:(day.temperature_2m_max||[])[0], loF:(day.temperature_2m_min||[])[0]};
-    wxLat=USER.lat; wxLon=USER.lon; wxAt=Date.now();
-  }catch(e){ /* keep the last-good WX */ }
-  finally{ wxBusy=false; scheduleSitrep(); }
-}
-
 const mkCard=(cls,ic,l1,l2,l3,hazard,col)=>({cls,ic,l1,l2,l3,hazard,col});   // cls = display color (from gate sev) · hazard = RANKING only, never a verdict vote · col = identity hex · mi (set later) = range sort key
-function wxCard(wxState, wn, kpNow){   // THE one weather card — {pin,card}: pinned up with hazards when a weather gate binds, else routine bottom card
-  const rnd=n=>n==null?null:Math.round(n);
-  const condLine=()=>{   // compact temp · sky · wind line (line 3 of a promoted card)
-    if(!WX) return '';
-    const [,d]=WMO[WX.code]||['','—'];
-    const t=rnd(WX.tempF), w=rnd(WX.windMph), wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
-    return (t!=null?t+'° · ':'')+d.toUpperCase()+(w!=null?' · '+wd+w+U(' mph'):'');
-  };
-  if(wxState==='down') return {pin:true, card:mkCard('danger','🌡️','WEATHER UNAVAILABLE',   // feed never loaded — chart can't compute
-    'feed down · chart can\'t compute','retrying every 5 s',true)};
-  if(wn){   // headline driven by the chart's NOW binding reason — the card can never name a different gate than the cell
-    const wxCap=Math.min(wn.windCeilFt,wn.cloudCapFt);   // weather-only ceiling [ft]
-    const WXHEAD={   // per chart reason code: GUST/VIS ground · WIND/SKY cap
-      GUST:['💨','HIGH WIND','gust '+Math.round(wn.gustMph)+U(' mph')+' · max '+LIM.wind],
-      WIND:['💨','HIGH WIND',Math.round(wn.windPeakMph)+U(' mph')+' aloft · max '+LIM.wind],
-      VIS: ['🌫️','LOW VISIBILITY',(wn.visSM!=null?wn.visSM.toFixed(1):'—')+U(' SM')+' · min 3'+U(' SM')],
-      SKY: ['☁️','LOW CLOUD','base '+Math.round(wn.cloudCapFt+SPEC.clrFt)+U(' ft')+' · need 500 clr'],
-    };
-    if(wn.grounded && WXHEAD[wn.reason]){   // weather grounding → red, matching the chart cell
-      const [ic,head,sub]=WXHEAD[wn.reason];
-      return {pin:true, card:mkCard('danger',ic,head,sub,condLine(),true)};
-    }
-    if(!wn.grounded && (wn.reason==='WIND'||wn.reason==='SKY') && wxCap<SPEC.regFt){   // weather is the binding cap → yellow
-      const wind=wn.reason==='WIND';
-      const flyMax=Math.max(0,Math.floor(wxCap/50)*50);   // floored to the chart step — card matches the top green row
-      const why=wind ? 'winds aloft over max'
-                     : 'cloud base '+Math.round(wn.cloudCapFt+SPEC.clrFt)+U(' ft');   // show the BASE so max-fly isn't read as cloud height
-      return {pin:true, card:mkCard('alert', wind?'💨':'☁️', wind?'HIGH WIND ALOFT':'LOW CLOUD',
-        'max fly '+flyMax+U(' ft')+' · '+why, condLine(), true)};
-    }
-    if(wn.precipInbound){   // echo in the buffer ring — alert only, precip never grounds
-      return {pin:true, card:mkCard('alert','🌧️','PRECIPITATION NEARBY','radar echo within '+BUFFER_MI+U(' mi'),condLine(),true)};
-    }
-  }
-  if(!WX) return {pin:false, card: wxState==='stale'   // nothing loaded yet
-    ? mkCard('alert','🌡️','WEATHER','feed unreachable','retrying every 5 s',true)
-    : mkCard('','🌡️','WEATHER','ACQUIRING FORECAST…','',false)};
-  const [emoji,desc]=WMO[WX.code]||['🌡️','—'];
-  const t=rnd(WX.tempF), f=rnd(WX.feelsF), w=rnd(WX.windMph), hi=rnd(WX.hiF), lo=rnd(WX.loF);
-  const l1=(t!=null?t+'°':'—')+' · '+desc.toUpperCase();
-  const wd=WX.windDir!=null?compass(WX.windDir)+' ':'';
-  const l2='WIND '+wd+(w!=null?w+U(' mph'):'—')+(f!=null?' · FEELS '+f+'°':'');
-  const l3=[hi!=null?'HIGH '+hi+'°':'', lo!=null?'LOW '+lo+'°':'',
-    kpNow!=null?'KP '+Math.round(kpNow):''].filter(Boolean).join(' · ');   // HIGH/LOW + current Kp (omitted when unknown)
-  if(wxState==='stale') return {pin:false, card:mkCard('alert',emoji,l1,l2,(l3?l3+' · ':'')+'STALE',true)};
-  return {pin:false, card:mkCard('',emoji,l1,l2,l3,false)};
-}
-// 5. location — GPS only, no IP fallback; position leaves the browser only as lat/lon params to the keyless feeds (pipeline: README)
+
+// 3. location — GPS only, no IP fallback; position leaves the browser only as lat/lon params to the keyless feeds (pipeline: README)
 let sitrepTimer=null;
 
 const FIRST_FIX_SETTLE_MS=3000;   // collect pings this long, then commit the most accurate
 const GOOD_ACCURACY_M=65;         // a ping this sharp commits immediately [m — the browser's unit]
-const ACC_WARN_M=50;              // worse than this (~164 ft) → yellow GPS card + gps gate caution
+const ACC_WARN_M=50;              // worse than this (~164 ft) → gps gate caution
 const POSITION_SMOOTHING=0.25;    // low-pass factor for stationary jitter (0 frozen … 1 raw)
 
 // movement refresh ladder [statute miles] — one tolerance per product, scaled to its spatial reach (see README)
 const REAL_MOVE_MI=0.03;     // ~160 ft: below = jitter (smoothed) · above = real move (snap)
 const ASP_TOL_MI=0.1;        // ~530 ft: re-query the point products — FAA gate + winds aloft
 const REFETCH_MOVE_MI=0.5;   // recentre the 25 mi listing footprint + kick the aircraft pull
-const WX_MOVE_MI=1.25;       // refetch the regional conditions card
 
 let firstFixCommitted=false, bestFirstPing=null, bestAccuracyM=Infinity;
 let smoothedLat=null, smoothedLon=null;
-let geolocationDenied=false, geoWatchId=null;
+let geoWatchId=null;
 let lastFetchLat=null, lastFetchLon=null;   // where the listing footprint was last centred
 
 function commitFirstFix(){
@@ -576,13 +477,13 @@ function onGeoPing(lat,lon,acc){
 }
 function startGpsWatch(){   // ONE persistent watchPosition — GPS streams continuously, it never rides the pulse
   if(geoWatchId!=null) return;
-  if(!navigator.geolocation){ geolocationDenied=true; sitrepTick(); return; }
+  if(!navigator.geolocation){ sitrepTick(); return; }   // no geolocation → no fix ever; the gps gate holds the verdict red
   try{
     geoWatchId=navigator.geolocation.watchPosition(
       pos=>onGeoPing(pos.coords.latitude,pos.coords.longitude,pos.coords.accuracy),
-      err=>{ if(err&&err.code===1){ geolocationDenied=true; sitrepTick(); } },   // PERMISSION_DENIED → permanent red card
+      err=>{ if(err&&err.code===1) sitrepTick(); },   // PERMISSION_DENIED → stays fixless, verdict stays red
       {enableHighAccuracy:true,timeout:10000,maximumAge:5000});
-  }catch(e){ geolocationDenied=true; sitrepTick(); }
+  }catch(e){ sitrepTick(); }
 }
 function locate(){ startGpsWatch(); }
 
@@ -596,14 +497,14 @@ function setUserFix(lat,lon,acc){   // adopt a committed fix — first fix kicks
   const first=USER.lat==null;
   USER.lat=lat; USER.lon=lon;
   if(acc!=null) USER.acc=acc;
-  if(first){ refetchNearbyFeeds(); loadWeather(true); }
+  if(first){ refetchNearbyFeeds(); }
   else if(lastFetchLat==null || havMi(lastFetchLat,lastFetchLon,lat,lon)>=REFETCH_MOVE_MI){
     refetchNearbyFeeds();
   }
   sitrepTick();   // always repaint
 }
 
-// 6. sitrep cards — CATS maps each feed to a card shape; cls = display color · head/sub/detail = lines 1/2/3
+// 4. sitrep cards — CATS maps each feed to a card shape; cls = display color · head/sub/detail = lines 1/2/3
 const cut=(s,n)=>escapeHtml(String(s==null?'':s).trim().slice(0,n));   // clip + escape (CSS adds the …)
 const ALT=f=>{const a=f.properties.alt;   // readsb reports alt_baro:'ground' for taxiing aircraft
   return a==='ground'?'on ground':isFinite(+a)&&a!==''?Math.round(+a)+U(' ft'):'—';};   // numeric-coerced — a feed string can never reach innerHTML
@@ -619,12 +520,6 @@ const AIRCRAFT_COLOR='#eaf1f8';   // the ONE aircraft identity color (white) —
 const AC_ICON='✈️';   // every contact is just an aircraft — no rotorcraft distinction
 const acTail=(f,n,fb)=>cut(f.properties.flight||f.properties.hex||fb||'?',n);   // callsign → hex → fallback, clipped
 const CATS=[
-  {src:'nws', hazard:true, icon:'⚠️',   // NWS warnings
-   cls:f=>SEV_CLS[nwsSev(f)],   // the ONE classifier — the nws gate scores from it too
-   head:f=>cut((f.properties.event||'warning').replace(/\s*warning$/i,'').toUpperCase(),22),
-   sub:f=>cut(f.properties.area,26),
-   detail:f=>{const e=f.properties.ends,d=e&&new Date(e);   // line 3 = when the warning ends
-     return d&&!isNaN(d)?'til '+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';}},
   {src:'nearair', hazard:false, air:true, icon:AC_ICON, cls:()=>'',   // ALL aircraft, military included — white identity
    head:f=>acTail(f,12),
    sub:acSub, detail:ALT},
@@ -696,17 +591,8 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
     t.classList.remove('warn','alert');
     if(verdictSeverity>=2) t.classList.add('warn'); else if(verdictSeverity>=1) t.classList.add('alert');
   }}
-  if(USER.lat==null){   // no fix yet (gps gate already red) → locating card only
-    const rows=[];
-    const row=c=>rows.push(
-      `<div class="sit-row${c.cls?' '+c.cls:''}"><span class="ic">${c.ic}</span>`+
-      `<span class="tx"><span class="s1">${c.l1||''}</span><span class="s2">${c.l2||''}</span><span class="s3">${c.l3||''}</span></span></div>`);
-    if(geolocationDenied){
-      row(mkCard('danger','📍','LOCATION REQUIRED','enable GPS and reload','permission denied',true));
-    }else{
-      row(mkCard('danger','📍','GPS LOCK','locating…','waiting for fix',true));
-    }
-    $('#sit-body').innerHTML=rows.join('');
+  if(USER.lat==null){   // no fix yet — the gps gate already holds the verdict red; no card
+    $('#sit-body').innerHTML='';
     return;
   }
   const lat=USER.lat, lon=USER.lon;
@@ -733,18 +619,15 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
       : mkCard('alert','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',rangeTxt,true));
   }
 
-  const wn=FLY.detail&&FLY.detail.wxNow;   // NOW-column weather diagnostics for the weather card
-
   const kpNow=FLY.detail?FLY.detail.kpNow:null;
-  if(gates.kp){   // SPACE WEATHER (pinned) — a view of the kp gate; a Kp storm degrades GPS/compass
-    cards.push(mkCard(SEV_CLS[gates.kp],'🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
-      gates.kp===2?'GPS / compass unreliable':'GPS accuracy may be reduced',true));
+  if(gates.kp){   // SPACE WEATHER (pinned) — a view of the kp gate; only a grounding storm (Kp ≥ 7) shows
+    cards.push(mkCard('danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
+      'GPS / compass unreliable',true));
   }
 
-  // DATA HEALTH (pinned) — feeds classified by the ONE feedTier() rule; weather rides its own card
-  const wxStale=feedTier(true, FLY.err.om, flyErrSince.om)==='yellow';   // everLoaded forced true — a dead feed still escalates
+  // DATA HEALTH (pinned) — feeds classified by the ONE feedTier() rule
   const redFeeds=[], yellowFeeds=[];
-  for(const [k,label] of [['asp','FAA airspace'],['kp','Kp'],['radar','radar']]){
+  for(const [k,label] of [['om','weather'],['asp','FAA airspace'],['kp','Kp']]){
     let tier=gateTier(k);
     if(k==='asp' && !tier && layerTier('airspace')==='yellow') tier='yellow';   // the heavier listing feed rides the same label
     if(tier==='red') redFeeds.push(label); else if(tier==='yellow') yellowFeeds.push(label);
@@ -761,9 +644,6 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
     cards.push(mkCard(red?'danger':'alert','📡', red?'DATA NOT LOADED':'DATA UNVERIFIED',
       cut(dataFeeds.join(' · '),30), red?'acquiring — verify before flying':'retrying every 5 s', dataHazard));
   }
-  const wxState=wxStale?(FLY.data?'stale':'down'):'ok';   // down = never loaded (red) · stale = last-good shows (yellow)
-  const wxc=wxCard(wxState, wn, kpNow);
-  if(wxc.pin) cards.push(wxc.card);   // a binding weather gate/outage pins up here; routine sinks to the bottom
 
   // in-ring item cards — one per feature; a low plane's OWN card transforms (one card per plane, never two)
   const items=[];
@@ -810,9 +690,6 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
     const card=mkCard(cls, ic, head, sub, l3, hazardOv!=null?hazardOv:cfg.hazard, col);
     card.mi=mi; cards.push(card);   // range = the in-category sort key
   });
-  const wxTail=[];                       // weather renders LAST
-  if(!wxc.pin) wxTail.push(wxc.card);    // general conditions, dead last (unless promoted above)
-
   // nearby context — objects beyond their ring but inside the DATA ring join `cards` as neutral general objects
   const screenMi=DATA_MI;
   const ctx=[];
@@ -849,42 +726,26 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
        cc.mi=mi; cards.push(cc);   // range-sorts with the in-ring general items
      });
 
-  // permanent LOCATION card — position status is never ambiguous (there is no map)
-  const accM = USER.acc;
-  const accPoor = accM != null && accM > ACC_WARN_M;   // same threshold as the gps gate — this card is its view
-  const locCard = mkCard(
-    accPoor ? 'alert' : '',
-    '📍',
-    'GPS LOCK',
-    accM != null
-      ? 'accuracy ±' + Math.round(accM * 3.28084) + U(' ft') + (accPoor ? ' · poor' : '')   // metres → ft at the boundary
-      : 'locating…',
-    lat.toFixed(4) + ', ' + lon.toFixed(4),
-    accPoor
-  );
-  if (accPoor) cards.push(locCard);   // poor lock promotes into the alert section
-  else wxTail.push(locCard);          // good lock stays dead last
-
   // ranking only (the verdict was folded at the top): 0 red warning · 1 yellow alert · 2 general,
-  // range-sorted within each; area-wide cards (no mi) head their section; wxTail renders after everything
+  // range-sorted within each; area-wide cards (no mi) head their section
   const catOf=c=>(c.hazard&&c.cls==='danger')?0:(c.hazard&&c.cls==='alert')?1:2;
   const rng=c=>c.mi==null?-1:c.mi;
   const ordered=cards.map((c,i)=>({c,i}))
     .sort((a,z)=>catOf(a.c)-catOf(z.c) || rng(a.c)-rng(z.c) || a.i-z.i)
     .map(x=>x.c);
-  [...ordered, ...wxTail].forEach(row);
+  ordered.forEach(row);
 
   $('#sit-body').innerHTML=rows.join('');
 }
 
 
-// 7. chart — the can-I-fly grid (400→sfc × NOW..+3h) at your position; the SITREP shares its TRFC/precip inputs
+// 5. chart — the can-I-fly grid (400→sfc × NOW..+3h) at your position; the SITREP shares its TRFC inputs
 // boundary conversions ONLY — internal math is imperial; providers speak metric (Open-Meteo metres, Mercator m/px)
 const M_TO_FT=3.28084, FT_TO_M=0.3048, M_TO_SM=1/1609.34, KT_TO_MPH=1.15078, MI_TO_M=1609.34;
 const toMph=kt=>kt==null?null:kt*KT_TO_MPH;   // ADS-B ground speed arrives in knots
 const comma=n=>Number(Math.round(n)).toLocaleString('en-US');
 const fmt=(n,d=0)=>(n==null||isNaN(n))?'–':Number(n).toFixed(d);
-const SPEC={kpCaut:5,kpGnd:7,visSM:3,clrFt:500,regFt:400};   // Part 107 limits; Kp 7 = G3, where NOAA flags GPS degradation
+const SPEC={kpGnd:7,visSM:3,clrFt:500,regFt:400};   // Part 107 limits; Kp 7 = G3, where NOAA flags GPS degradation
 const FAA_SEP_FT=500;   // stay this far BELOW manned traffic — §91.119(c) minimum safe altitude, the conservative buffer
 const WARN_AGL_FT=SPEC.regFt+FAA_SEP_FT;   // 900 ft AGL — a plane below this alerts AND caps the chart (one shared number)
 const LIM={wind:27};   // aircraft max wind [mph] — gates surface gust + caps the wind-aloft scan
@@ -1022,55 +883,6 @@ function hydrateAsp(){   // restore the persisted LAANC cache (validated, hard-T
 }
 function persistAsp(){ store(ASP_CACHE_KEY,JSON.stringify(aspCache)); }
 
-// radar precip sampler — is there NEXRAD reflectivity within rngMi? Tiles composite on an offscreen
-// canvas at native z8; returns true/false, or null when tiles can't be read (fails OPEN via FLY.err)
-const RADAR_Z=8, RADAR_ALPHA=80, RADAR_MIN_PX=2;   // alpha threshold + ≥2 px kills speckle
-const RADAR_TILE_TIMEOUT_MS=8000;   // hard bound per tile — keeps the refresh cycle finite on a stalled connection
-const radarMemo=new Map();   // same window+point+range reuses the scan
-const RADAR_MEMO_MAX=8;      // small LRU — repeat samples within a window can't churn
-async function sampleRadarPrecip(lat,lon,rngMi){
-  const n=1<<RADAR_Z, d=Math.PI/180;
-  const xf=(lon+180)/360*n;
-  const yf=(1-Math.log(Math.tan(lat*d)+1/Math.cos(lat*d))/Math.PI)/2*n;   // Web Mercator tile coords
-  if(!isFinite(yf)||yf<0||yf>=n) return false;         // poles — no NEXRAD there anyway
-  const mPerPx=40075016.686*Math.cos(lat*d)/(n*256);   // Mercator metres per pixel at this latitude
-  const rPx=Math.max(1,rngMi*MI_TO_M/mPerPx);          // ring radius in mosaic pixels
-  const cx=xf*256, cy=yf*256;
-  const tx0=Math.floor((cx-rPx)/256), tx1=Math.floor((cx+rPx)/256);
-  const ty0=Math.max(0,Math.floor((cy-rPx)/256)), ty1=Math.min(n-1,Math.floor((cy+rPx)/256));
-  const bust=currentRadarBust();   // memo keys on the refresh window — the browser tile cache is shared across samples
-  const key=bust+'|'+lat.toFixed(3)+'|'+lon.toFixed(3)+'|'+rngMi;
-  if(radarMemo.has(key)){ const v=radarMemo.get(key);
-    radarMemo.delete(key); radarMemo.set(key,v);   // refresh recency — eviction stays LRU
-    return v; }
-  const tiles=[];
-  for(let tx=tx0;tx<=tx1;tx++)for(let ty=ty0;ty<=ty1;ty++)
-    tiles.push({x:((tx%n)+n)%n,y:ty,px:(tx-tx0)*256,py:(ty-ty0)*256});   // x wraps the antimeridian
-  const imgs=await Promise.all(tiles.map(t=>new Promise((res,rej)=>{
-    const im=new Image(); im.crossOrigin='anonymous';
-    const to=setTimeout(()=>{ im.src=''; rej(new Error('radar tile timeout')); },RADAR_TILE_TIMEOUT_MS);   // Image() has no native timeout — a stalled socket would otherwise hang for minutes
-    im.onload=()=>{ clearTimeout(to); res({t,im}); };
-    im.onerror=()=>{ clearTimeout(to); rej(new Error('radar tile failed')); };
-    im.src=RADAR_TILE_URL.replace('{z}',RADAR_Z).replace('{x}',t.x).replace('{y}',t.y)+'?'+bust;
-  })));
-  const w=(tx1-tx0+1)*256, h=(ty1-ty0+1)*256;
-  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
-  const ctx=cv.getContext('2d',{willReadFrequently:true});
-  imgs.forEach(({t,im})=>ctx.drawImage(im,t.px,t.py));
-  const px=ctx.getImageData(0,0,w,h).data;   // throws on a tainted canvas → caller catches → null
-  const ox=cx-tx0*256, oy=cy-ty0*256;
-  const x0=Math.max(0,Math.floor(ox-rPx)), x1=Math.min(w-1,Math.ceil(ox+rPx));
-  const y0=Math.max(0,Math.floor(oy-rPx)), y1=Math.min(h-1,Math.ceil(oy+rPx));
-  let hits=0, found=false;
-  for(let y=y0;y<=y1&&!found;y++)for(let x=x0;x<=x1;x++){
-    const dx=x-ox, dy=y-oy; if(dx*dx+dy*dy>rPx*rPx) continue;   // stay inside the ring
-    if(px[(y*w+x)*4+3]>=RADAR_ALPHA && ++hits>=RADAR_MIN_PX){ found=true; break; }
-  }
-  radarMemo.set(key,found);
-  if(radarMemo.size>RADAR_MEMO_MAX) radarMemo.delete(radarMemo.keys().next().value);
-  return found;
-}
-
 // traffic — the ONE assessment shared by the chart's TRFC gate, the verdict's traffic gate, and the
 // LOW AIRCRAFT cards, so they can never disagree
 function assessTraffic(){
@@ -1101,8 +913,7 @@ function assessTraffic(){
 const FLY={
   data:null,     // last good {lat,lon,aloft,kp,asp} — lat/lon = where it was fetched
   detail:null,   // computed render model (also read by cards/gates)
-  precipInbound:null,   // echo in the buffer ring → yellow "nearby" alert (precip NEVER grounds)
-  err:{om:true,kp:true,asp:true,radar:true},   // every gate starts UNVERIFIED — the app never opens falsely-green
+  err:{om:true,kp:true,asp:true},   // every gate starts UNVERIFIED — the app never opens falsely-green
 };
 
 // data freshness — ONE classifier for every source: red = never loaded (grounds, no grace) ·
@@ -1113,9 +924,9 @@ function feedTier(everLoaded, failing, since){
   if(!everLoaded) return 'red';
   return since>0 && Date.now()-since>=DATA_ERR_GRACE_MS ? 'yellow' : null;   // since 0 = not yet stamped → within grace
 }
-const flyEver={om:false,asp:false,kp:false,radar:true};    // ever loaded, per chart gate — radar starts "loaded": it only powers the nearby alert, so it can degrade to yellow but never ground
-const flyErrSince={om:0,asp:0,kp:0,radar:0};                // failing since, per chart gate
-const FLY_ERR_LABEL={om:'weather',asp:'FAA airspace',kp:'Kp',radar:'radar'};
+const flyEver={om:false,asp:false,kp:false};    // ever loaded, per chart gate
+const flyErrSince={om:0,asp:0,kp:0};            // failing since, per chart gate
+const FLY_ERR_LABEL={om:'weather',asp:'FAA airspace',kp:'Kp'};
 const gateTier=k=>feedTier(flyEver[k], FLY.err[k], flyErrSince[k]);
 const layerTier=id=>{ const st=LAYER_STATE[id]||{}; return feedTier(true, st.failSince>0, st.failSince); };   // listing feeds only ever go yellow — their startup is covered by the matching gate
 function flyNeverVerified(){ return Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='red'); }   // any required gate never verified
@@ -1157,22 +968,18 @@ function flyComputeDetail(){   // apply every gate and build the chart render mo
   };
   const trafficCeil=assessTraffic().ceilFt;   // NOW-only manned-traffic ceiling (Infinity = none)
   const restrict=flyRestriction();            // a hard zone under you grounds every column
-  let wxNow=null;   // NOW-column weather diagnostics, captured for the weather card + gates
+  let wxNow=null;   // NOW-column weather diagnostics, captured for the gates
   const grid=cols.map((c,n)=>{
     const prof=makeProfile(c.windPts);
     const visSM=c.visM!=null?c.visM*M_TO_SM:null;   // metres → SM at the edge
     const kpv=kpAt(n);
     const gGust=atLim(c.gustMph), gVis=visSM!=null&&visSM<SPEC.visSM, gKp=kpv!=null&&kpv>=SPEC.kpGnd;
-    const globalGrounded=gGust||gVis||gKp||!!restrict;   // precip never grounds — it only alerts (precipInbound)
+    const globalGrounded=gGust||gVis||gKp||!!restrict;
     const cloudCapFt=c.baseFt==null?Infinity:(c.baseFt-SPEC.clrFt);   // fly 500 below the base
     let hitFt=null; for(const ft of ALTS_UP){ if(atLim(prof(ft))){ hitFt=ft; break; } }   // first over-limit level
     const windCeilFt=hitFt==null?SPEC.regFt:hitFt-50;
-    if(n===0){   // capture raw NOW telemetry for the weather card's headline numbers
-      let windPeakMph=0; for(const ft of ALTS){ const v=prof(ft); if(v!=null&&v>windPeakMph) windPeakMph=v; }
-      wxNow={gust:gGust,vis:gVis,precipInbound:FLY.precipInbound===true,windCeilFt,cloudCapFt,
-        gustMph:c.gustMph, visSM, windPeakMph};
-    }
-    const tCeil = n===0 ? trafficCeil : Infinity;   // traffic is a live snapshot, like radar — NOW only
+    if(n===0) wxNow={gust:gGust,vis:gVis,windCeilFt,cloudCapFt};   // the NOW values the gates score from
+    const tCeil = n===0 ? trafficCeil : Infinity;   // traffic is a live snapshot — NOW only
     let trfcAlt = (n===0 && trafficCeil!==Infinity)   // independent TRFC marker — low traffic is always visible on the chart
       ? (trafficCeil<0 ? 0 : Math.min(SPEC.regFt, trafficCeil+50)) : null;
     const capFt=Math.min(SPEC.regFt, cloudCapFt, windCeilFt, aspCapFt, tCeil);
@@ -1198,7 +1005,6 @@ function flyComputeDetail(){   // apply every gate and build the chart render mo
     if(trfcAlt===0 && reasonAlt===0 && reason!=='TRFC') trfcAlt=50;   // grounding collision at SFC → bump TRFC one band so both show
     return {n,prof,gustMph:c.gustMph,windDir:c.windDir,capFt,maxFly,grounded,reason,reasonAlt,trfcAlt};
   });
-  if(wxNow){ const g0=grid[0]; wxNow.reason=g0.reason; wxNow.grounded=g0.grounded; }   // the weather card's headline = the chart's own binding reason
   const cellState=(g,ft)=>{
     if(g.grounded) return 'bad';
     const mph=g.prof(ft); if(mph==null) return '';
@@ -1283,7 +1089,6 @@ async function flyRefresh(){
     const pKp    = kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp(),2).catch(()=>null);
     const pGrid  = fresh?Promise.resolve({ceilFt:cc.ceilFt}):retry(()=>getLaancCeil(base.lat,base.lon,rngMi),2).catch(()=>null);   // the legal gate deserves the same 2 tries as everything else
     const pDef   = defFresh?Promise.resolve({active:dc.active}):retry(()=>getDefense(base.lat,base.lon,rngMi),2).catch(()=>null);
-    const pPrecipBuf= retry(()=>sampleRadarPrecip(base.lat,base.lon,BUFFER_MI),2).catch(()=>null);  // buffer-ring echo = yellow "nearby" (the ONLY precip signal — precip never grounds)
 
     const aloft=await pAloft;   // weather first — paint with last-good gates rather than wait on the slow FAA query
     if(myGen!==flyGen) return;   // superseded by a stall takeover — drop this cycle's writes
@@ -1296,7 +1101,7 @@ async function flyRefresh(){
       FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
     }
 
-    const [kpRaw,gridRaw,defRaw,precipBuf]=await Promise.all([pKp,pGrid,pDef,pPrecipBuf]);
+    const [kpRaw,gridRaw,defRaw]=await Promise.all([pKp,pGrid,pDef]);
     if(myGen!==flyGen) return;   // superseded mid-flight — a newer cycle owns the gates now
     if(!aloftKeep&&aloft!=null) flyAloftAt=Date.now();   // fresh pulls reset their clocks
     if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();
@@ -1309,7 +1114,6 @@ async function flyRefresh(){
     if(defRes!=null){ if(!defFresh) defCache={lat:base.lat,lon:base.lon,rng:rngMi,active:defRes.active,ts:Date.now()}; }
     else if(defMatches&&defAge<DEF_HARD_TTL) defRes={active:dc.active};
     const asp=(gridRes!=null&&defRes!=null)?{ceilFt:defRes.active?0:gridRes.ceilFt}:null;   // known only when BOTH halves are; defense forces 0
-    FLY.precipInbound=precipBuf===true; FLY.err.radar=precipBuf==null;   // nearby = anywhere in the 5 mi buffer ring
     if(aloft){
       FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
       FLY.err.om=false; FLY.err.asp=asp==null;
@@ -1333,10 +1137,8 @@ async function flyRefresh(){
   }
 }
 
-// 8. verdict gate table — the ONE point of verdict logic; every condition scored once (0/1/2),
+// 6. verdict gate table — the ONE point of verdict logic; every condition scored once (0/1/2),
 // verdict = max over the table, cards + chart are views (model: README "Verdict color")
-const SEV_CLS=['','alert','danger'];   // gate severity → card display class
-const nwsSev=f=>/Extreme|Severe/i.test(f.properties.severity)?2:1;   // the ONE NWS classifier — gate AND card color
 function zonesNearSev(){   // hazard zone within the ring = PROXIMITY caution (being NEAR is legal; INSIDE is g.restrict's no-go)
   if(USER.lat==null) return 0;
   const rMi=RED_MI;
@@ -1345,17 +1147,6 @@ function zonesNearSev(){   // hazard zone within the ring = PROXIMITY caution (b
   if(featsIn('airspace').some(f=>(f.properties.sev==='hard'||f.properties.sev==='caution')&&near(f))) return 1;
   if(featsIn('nps').some(near)) return 1;
   return 0;   // (a defense TFR in range still reds via g.faa — its gate query grounds the ceiling)
-}
-function nwsGateSev(){   // worst NWS warning covering you, or with an edge inside the ring
-  if(USER.lat==null) return 0;
-  const rMi=RED_MI;
-  let sev=0;
-  featsIn('nws').forEach(f=>{ if(sev===2) return;
-    if(pointInFeature(f,USER.lon,USER.lat)){ sev=Math.max(sev,nwsSev(f)); return; }
-    const ne=nearestEdge(f,USER.lon,USER.lat);
-    if(ne&&ne.mi<=rMi) sev=Math.max(sev,nwsSev(f));
-  });
-  return sev;
 }
 function evalGates(tr){   // tr = the shared assessTraffic() result, so gate and cards read one assessment
   const d=FLY.detail, wn=d&&d.wxNow;
@@ -1369,18 +1160,16 @@ function evalGates(tr){   // tr = the shared assessTraffic() result, so gate and
   g.vis =wn&&wn.vis?2:0;
   g.wind=wn?capSev(wn.windCeilFt):0;
   g.cloud=wn?capSev(wn.cloudCapFt):0;
-  g.precip=wn&&wn.precipInbound?1:0;   // precip only ever cautions — echo within 5 mi
   const kpv=d?d.kpNow:null;
-  g.kp=kpv==null?0:kpv>=SPEC.kpGnd?2:kpv>=SPEC.kpCaut?1:0;   // one Kp gate, both thresholds
+  g.kp=kpv!=null&&kpv>=SPEC.kpGnd?2:0;   // grounding storm only — no caution tier
   g.faa=(d&&!d.aspUnknown)?capSev(d.aspCapFt):0;   // unknown scores 0 here — g.data carries the unknown
   g.traffic=tr.ceilFt<0?2:(tr.ceilFt<SPEC.regFt||tr.low.length?1:0);   // red only when a plane GROUNDS the chart; capping/in-ring = caution
   g.restrict=flyRestriction()?2:0;   // hard restriction UNDER you — the chart grounds with it
   g.zones=zonesNearSev();
-  g.nws=nwsGateSev();   // severe/extreme warning here = no-go, other warnings = caution
   return g;
 }
 
-// 9. clock + verdict paint — the clock is plain white; the NOW header carries the verdict color
+// 7. clock + verdict paint — the clock is plain white; the NOW header carries the verdict color
 const VERDICT_CLASS=['go','caution','nogo'];   // CSS class per severity 0/1/2
 let verdictSeverity=2;   // born RED (unknown ≠ clear) — the first paint can't read green even for a frame
 function clockParts(){   // local device time, 12-hour, no AM/PM
@@ -1404,7 +1193,7 @@ let _colonBright=true;
 function blinkColon(){ const c=document.querySelector('#fly-board .clk-colon');   // white ↔ off-white, never black; re-queried so it survives re-renders
   if(c) c.style.color=(_colonBright=!_colonBright)?COLON_WHITE:COLON_OFFWHITE; }
 
-// 10. boot
+// 8. boot
 function boot(){
   document.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});   // read-only display: no double-tap zoom…
   document.addEventListener('contextmenu',e=>e.preventDefault());                // …no context menu…
