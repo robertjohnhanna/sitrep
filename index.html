@@ -242,11 +242,12 @@ function pointInFeature(f,lon,lat){   // inside the outer ring and not in a hole
 }
 const escapeHtml =s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-// RMHIQ hub — the ONE airspace backend (isquividet/rmhiq): it walks the national FAA/NPS layers
+// RMHIQ hub — the airspace-listing backend (isquividet/rmhiq): it walks the national FAA/NPS layers
 // into D1 on its own paced schedule; canifly only READS its bbox API, so no client can ever hit
 // FAA's throttle. CORS-open, keyless, and it serves the exact properties FAA does — plus a
 // `layer` id on each feature. Feature-bbox overlap is a superset of true intersection, so every
-// query errs toward INCLUDING a restriction, never dropping one.
+// query errs toward INCLUDING a restriction, never dropping one. (LAANC ceilings are the one
+// exception — pulled direct from the FAA UAS Facility Map now that it's just a tiny point query.)
 const RMHIQ='https://rmhiq.p9wtwsggnd.workers.dev';
 async function rmhiqFC(bbox,layers,timeout){   // bbox query → FeatureCollection; anything short of complete coverage THROWS
   const fc=await getJSON(`${RMHIQ}/api/airspace?bbox=${bbox}&layers=${layers}`,{timeout:timeout||10000});
@@ -749,13 +750,11 @@ const ALTS_UP=(()=>{const a=[];for(let f=0;f<=SPEC.regFt;f+=50)a.push(f);return 
 const ALTS=[...ALTS_UP].reverse();   // …and descending (grid row order)
 const FC_HOURS=3;   // forecast columns beyond NOW
 const KP_URL='https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json';
-const FAA_GIS='https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services';   // official AIS — the LAANC fallback ONLY (see getLaancCeil)
+const FAA_GIS='https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services';   // official AIS — the LAANC ceiling source (queried direct; see getLaancCeil)
 const aspUrl=(lat,lon,rng)=>`${FAA_GIS}/FAA_UAS_FacilityMap_Data/FeatureServer/0/query`
   +`?geometry=${lon.toFixed(3)},${lat.toFixed(3)}&geometryType=esriGeometryPoint&inSR=4326`
   +`&spatialRel=esriSpatialRelIntersects&distance=${rng}&units=esriSRUnit_StatuteMile`
   +`&outFields=CEILING,UNIT&returnGeometry=false&f=json`;
-const ptEnv=(lat,lon,mi)=>{ const {dLat,dLon}=geoDeltas(mi,lat);   // ±mi box around a point — the hub bbox for the FAA gate queries (a superset of the old mi-radius disc, so the answer only gets MORE conservative)
-  return [lon-dLon,lat-dLat,lon+dLon,lat+dLat].map(n=>n.toFixed(3)).join(','); };
 const PRES_LEVELS=[1000,975,950,925,900,850,800,700];   // pressure levels scanned for cloud decks
 const CLOUD_FEW_PCT=12;   // lowest level with ≥ this % cover = the base
 function aloftUrl(lat,lon){
@@ -828,35 +827,14 @@ async function getKp(){   // SWPC planetary-Kp: full time-sorted 3 h bin list, s
   }).filter(x=>!isNaN(x.ms)&&!isNaN(x.kp)).sort((a,b)=>a.ms-b.ms);
   return rows.length?{rows}:null;
 }
-// FAA gate = TWO rmhiq bbox queries with different lifetimes (LAANC near-static, defense TFRs hours-fresh).
-// Both are LEGAL warnings: anything that could understate a restriction THROWS — never reads "clear".
-let _laancReadyAt=0;   // last time /api/laanc confirmed a COMPLETED national walk
-const LAANC_READY_TTL=6*60*60*1000;   // re-confirm on the LAANC cache's own cycle
-async function laancReady(){   // the hub fills its 380k-cell grid in daily slices — a PARTIAL walk in range would
-  // overstate the ceiling (min over a subset), so its laanc layer is trusted only once one full
-  // national walk has completed: `confirmed` is stamped by nothing else. Hub unreachable → THROW
-  // (unverified, same as an FAA outage) — only a definitive "fill incomplete" answers false.
-  if(Date.now()-_laancReadyAt<LAANC_READY_TTL) return true;
-  const j=await getJSON(`${RMHIQ}/api/laanc`,{timeout:7000});
-  if(j&&j.confirmed!=null){ _laancReadyAt=Date.now(); return true; }
-  return false;
-}
+// LAANC gate — pulled DIRECT from the FAA UAS Facility Map, not rmhiq (the ceiling is now just a tiny
+// OVERHEAD_MI box, a light point query). A LEGAL warning: anything that could understate the ceiling
+// THROWS — it never reads "clear". (The rest of the airspace still comes from the rmhiq hub.)
 async function getLaancCeil(lat,lon,rng){
-  if(!(await laancReady())) return getLaancCeilFAA(lat,lon,rng);   // grid mid-fill → the FAA source directly, until the fill lands
-  const fc=await rmhiqFC(ptEnv(lat,lon,rng),'laanc',7000);
-  let ceil=SPEC.regFt;   // no grid cells in range = uncontrolled → the Part 107 ceiling
-  for(const f of fc.features){
-    const c=f.properties&&f.properties.CEILING;   // the hub stores no UNIT — it's the constant "Feet"
-    if(!Number.isFinite(c)||c<0||c>10000) throw new Error('laanc cell has no usable ceiling');
-    ceil=Math.min(ceil,c);   // worst cell in the tight overhead box wins (your cell + a GPS buffer)
-  }
-  return {ceilFt:ceil};
-}
-async function getLaancCeilFAA(lat,lon,rng){   // direct-FAA fallback — self-retires once the hub's laanc fill completes
   const grid=await getJSON(aspUrl(lat,lon,rng),{timeout:7000});
   if(grid.error||!Array.isArray(grid.features)) throw new Error('airspace grid query failed');
   if(grid.exceededTransferLimit) throw new Error('airspace result truncated');
-  let ceil=SPEC.regFt;
+  let ceil=SPEC.regFt;   // no grid cells in the box = uncontrolled → the Part 107 ceiling
   for(const f of grid.features){
     const a=f&&f.attributes;
     const c=(a&&typeof a.CEILING==='number')?a.CEILING:NaN;

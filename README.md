@@ -42,7 +42,7 @@ a card never votes), and `assessTraffic()` is the one traffic assessment they al
 | `nps` | rmhiq `/api/airspace` — layer `nps` | national-park lands (no-fly) | 25 mi box | on move |
 | `getAloft` | open-meteo `/v1/forecast` | winds to ~590 ft + gust + dir + cloud + vis (NOW..+3h) | point | ~15 s |
 | `getKp` | swpc.noaa.gov Kp forecast | planetary Kp (3-hr bins) | global | ~3 min |
-| `getLaancCeil` | rmhiq `/api/airspace` — layer `laanc` (FAA-direct fallback until the hub's first full grid walk) | drone grid ceiling **at your cell** | ~0.1 mi box (`OVERHEAD_MI`) | cached 6 h |
+| `getLaancCeil` | **FAA UAS Facility Map** (ArcGIS, direct — no longer via rmhiq) | drone grid ceiling **at your cell** | ~0.1 mi box (`OVERHEAD_MI`) | cached 6 h |
 | `ensureGroundElev` | open-meteo `/v1/elevation` | ground elevation for AGL | per ~0.7 mi cell | on demand |
 
 Defense TFRs are **not** a separate gate — they ride the `airspace` listing (layer `asp-defense-tfr`)
@@ -52,16 +52,17 @@ and ground you the same way every other hard zone does: only when you're **insid
 Winds are requested straight in **mph** — the unit shown and gated on — so no wind conversion
 is needed anywhere; aircraft ground speed still arrives in knots and is converted to mph.
 
-**The rmhiq hub** pulls FAA/NPS on its own paced schedule; canifly only reads its stored
-rows, so no amount of client traffic can hit FAA's throttle. Hub reads keep canifly's
-unknown-≠-clear rules: a `truncated` FeatureCollection **throws** (a clipped listing must
-never read as complete coverage); `getLaancCeil` trusts the hub's `laanc` grid only after
-`/api/laanc` reports a completed national walk (`confirmed` set — mid-fill, a partial grid
-would overstate the ceiling) and falls back to the direct FAA point query until then.
-The LAANC query sends a tight ±`OVERHEAD_MI` **box** around you and takes the worst cell in
-it — your position's ceiling plus a GPS-error buffer, not the worst cell within a mile. Hub
-feature-bbox overlap is a superset of true geometry intersection: a restriction can be
-over-included, never dropped.
+**The rmhiq hub** serves the airspace listing + NPS (everything except LAANC): canifly only reads
+its stored rows, so no amount of client traffic can hit FAA's throttle. Hub reads keep canifly's
+unknown-≠-clear rules: a `truncated` FeatureCollection **throws** (a clipped listing must never read
+as complete coverage). Hub feature-bbox overlap is a superset of true geometry intersection: a
+restriction can be over-included, never dropped.
+
+**LAANC ceilings are pulled DIRECT** from the FAA UAS Facility Map (ArcGIS), not the hub — now that
+the query is just a tight ±`OVERHEAD_MI` box around you it's a light point query, so there's no
+throttle concern. It takes the worst cell in that box: your position's ceiling plus a GPS-error
+buffer, not the worst cell within a mile. Same legal-warning rule — a query error or `CEILING` in
+unexpected units **throws** rather than reading "clear".
 
 ---
 
@@ -72,7 +73,7 @@ over-included, never dropped.
 | `pulse()` every 5 s | pull due feeds + chart |
 | GPS move | each product refreshes once you pass **its** tolerance (see the ladder below) |
 | page hidden | pulse **pauses**; on return → one immediate pulse |
-| per feed | self-throttles (Kp 3 min, LAANC 6 h / defense TFR 10 min) |
+| per feed | self-throttles (Kp 3 min, LAANC cached 6 h) |
 
 **Movement refresh ladder** — a move refreshes each product once it exceeds that product's
 own tolerance, scaled to its spatial reach (deliberately *not* one distance for everything —
@@ -81,7 +82,7 @@ a 1 mi point query goes stale per-foot faster than a 25 mi disk):
 | Move exceeds | Refreshes |
 |---|---|
 | **~160 ft** (`REAL_MOVE_MI`) | registers as real movement — the fix snaps instead of smoothing jitter |
-| **~530 ft** (`ASP_TOL_MI`) | the point products — FAA gate (LAANC + defense) + winds aloft |
+| **~530 ft** (`ASP_TOL_MI`) | the point products — FAA gate (LAANC) + winds aloft |
 | **0.5 mi** (`REFETCH_MOVE_MI`) | the 25 mi listing footprint (airspace / NPS) + an immediate aircraft pull |
 
 Aircraft also re-pull every 5 s pulse regardless of movement.
