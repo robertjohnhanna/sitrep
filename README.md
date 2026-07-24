@@ -1,6 +1,9 @@
 # canifly — logic map
 
-Keyless, single-file drone preflight brief (`index.html`, vanilla JS, no build/backend).
+Keyless, single-file drone preflight brief (`index.html`, vanilla JS, no build).
+Airspace is read from the **rmhiq hub** (`isquividet/rmhiq` — one Worker that walks the
+national FAA/NPS layers into D1 on its own paced pulse and serves them by bounding box);
+every other feed is pulled straight from source.
 Located by GPS; answers **can I fly here, now, and how high?** No map — a flyability chart
 (a white clock in its corner, the verdict color on its NOW column) over a distance-sorted
 SITREP. This file maps **where data comes from, how it's shaped, and how the verdict is
@@ -12,7 +15,7 @@ decided.** For reference only.
 
 ```mermaid
 flowchart LR
-  GPS["GPS watch — watchPosition<br/>→ USER lat / lon / acc"] --> PULSE["pulse() every 5 s → FETCH (keyless, CORS-open)<br/>aircraft · airspace · NPS<br/>winds-aloft · Kp · elevation"]
+  GPS["GPS watch — watchPosition<br/>→ USER lat / lon / acc"] --> PULSE["pulse() every 5 s → FETCH (keyless, CORS-open)<br/>aircraft · airspace + NPS (rmhiq hub)<br/>winds-aloft · Kp · elevation"]
   PULSE --> STORE[("STORE<br/>LAYER_STATE[id].features<br/>FLY.data")]
   STORE --> GATES["evalGates()<br/>→ gate table (0/1/2)"]
   STORE --> CHART["flyComputeDetail()<br/>→ can-I-fly grid"]
@@ -35,16 +38,27 @@ a card never votes), and `assessTraffic()` is the one traffic assessment they al
 | Feed / call | Endpoint | Provides | Scope | Refresh |
 |---|---|---|---|---|
 | `nearair` | airplanes.live `/point/…` **+** adsb.fi `/lat/…/dist/…` (own route + shape each) — both queried every pull, contacts **merged by icao24/hex, newest report wins** | ALL aircraft (civil + military, no distinction) | ~25 mi around you | 5 s |
-| `airspace` | FAA ArcGIS `services6…` (5 layers) | Class B/C/D, TFR, SUA, NSUFR, stadiums | 25 mi box | 15 min + on move |
-| `nps` | NPS ArcGIS `services1…` | national-park lands (no-fly) | 25 mi box | on move |
+| `airspace` | rmhiq `/api/airspace` — ONE bbox call, layers `asp-class,asp-defense-tfr,asp-sua,asp-nsufr,asp-stadiums` | Class B/C/D+E2, TFR, SUA, NSUFR, stadiums | 25 mi box | 15 min + on move |
+| `nps` | rmhiq `/api/airspace` — layer `nps` | national-park lands (no-fly) | 25 mi box | on move |
 | `getAloft` | open-meteo `/v1/forecast` | winds to ~590 ft + gust + dir + cloud + vis (NOW..+3h) | point | ~15 s |
 | `getKp` | swpc.noaa.gov Kp forecast | planetary Kp (3-hr bins) | global | ~3 min |
-| `getLaancCeil` | FAA ArcGIS LAANC grid | drone grid ceiling | 1 mi point | cached 6 h |
-| `getDefense` | FAA defense-TFR areas | hard no-fly (ceiling → 0) | 1 mi point | ~10 min |
+| `getLaancCeil` | rmhiq `/api/airspace` — layer `laanc` (FAA-direct fallback until the hub's first full grid walk) | drone grid ceiling | 1 mi box | cached 6 h |
+| `getDefense` | rmhiq `/api/airspace` — layer `asp-defense-tfr`, gated on hub freshness (`/api`) | hard no-fly (ceiling → 0) | 1 mi box | ~10 min |
 | `ensureGroundElev` | open-meteo `/v1/elevation` | ground elevation for AGL | per ~0.7 mi cell | on demand |
 
 Winds are requested straight in **mph** — the unit shown and gated on — so no wind conversion
 is needed anywhere; aircraft ground speed still arrives in knots and is converted to mph.
+
+**The rmhiq hub** pulls FAA/NPS on its own paced schedule; canifly only reads its stored
+rows, so no amount of client traffic can hit FAA's throttle. Hub reads keep canifly's
+unknown-≠-clear rules: a `truncated` FeatureCollection **throws** (a clipped listing must
+never read as complete coverage); `getLaancCeil` trusts the hub's `laanc` grid only after
+`/api/laanc` reports a completed national walk (`confirmed` set — mid-fill, a partial grid
+would overstate the ceiling) and falls back to the direct FAA point query until then;
+`getDefense` throws unless the hub's `asp-defense-tfr` source reports `fresh` on `/api`.
+Gate queries send a ±1 mi **box** where the FAA queries used a 1 mi disc — a superset, so
+results only get more conservative. Hub feature-bbox overlap is likewise a superset of true
+geometry intersection: a restriction can be over-included, never dropped.
 
 ---
 

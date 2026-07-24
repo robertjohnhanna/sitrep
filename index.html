@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%A9%3C/text%3E%3C/svg%3E">
 <title>canifly</title>
 
-<!-- canifly — single-file GPS drone-preflight brief (no backend/build/keys). Logic map: README.md -->
+<!-- canifly — single-file GPS drone-preflight brief (no build/keys; airspace reads the rmhiq hub). Logic map: README.md -->
 
 <style>
   /* theme + base — read-only display: no selection, callout, tap highlight, or zoom */
@@ -244,6 +244,30 @@ function pointInFeature(f,lon,lat){   // inside the outer ring and not in a hole
 }
 const escapeHtml =s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+// RMHIQ hub — the ONE airspace backend (isquividet/rmhiq): it walks the national FAA/NPS layers
+// into D1 on its own paced schedule; canifly only READS its bbox API, so no client can ever hit
+// FAA's throttle. CORS-open, keyless, and it serves the exact properties FAA does — plus a
+// `layer` id on each feature. Feature-bbox overlap is a superset of true intersection, so every
+// query errs toward INCLUDING a restriction, never dropping one.
+const RMHIQ='https://rmhiq.isquividet.workers.dev';
+async function rmhiqFC(bbox,layers,timeout){   // bbox query → FeatureCollection; anything short of complete coverage THROWS
+  const fc=await getJSON(`${RMHIQ}/api/airspace?bbox=${bbox}&layers=${layers}`,{timeout:timeout||10000});
+  if(fc.error||fc.type!=='FeatureCollection'||!Array.isArray(fc.features)) throw new Error('rmhiq airspace query failed');
+  if(fc.truncated) throw new Error('rmhiq airspace result truncated');   // a clipped listing must not read as complete coverage
+  return fc;
+}
+let _rmhiqCat=null,_rmhiqCatAt=0;
+const RMHIQ_CAT_TTL=5*60*1000;   // catalog reuse — freshness flags move on the hub's own pulses
+async function rmhiqFresh(id){   // hub catalog freshness for one source; an unknown source reads NOT fresh
+  if(!_rmhiqCat||Date.now()-_rmhiqCatAt>=RMHIQ_CAT_TTL){
+    const j=await getJSON(`${RMHIQ}/api`,{timeout:7000});
+    if(!Array.isArray(j.sources)) throw new Error('rmhiq catalog failed');
+    _rmhiqCat=j.sources; _rmhiqCatAt=Date.now();
+  }
+  const s=_rmhiqCat.find(x=>x.id===id);
+  return !!(s&&s.fresh);
+}
+
 window.__sitrep={};   // debug/test handle (modules attach as the app wires up)
 
 // 1. data feeds — {id, refresh[s], viewport?, loader → GeoJSON FC (null = keep current)}; features are
@@ -271,39 +295,32 @@ function floorFt(v){   // airspace floor → ft: SFC/blank → 0 · FLnnn → nn
 defLayer({   // FAA AIRSPACE LISTING (cards + zones/restrict gates) — CONTEXT; the FAA ceiling gate has its own point queries
   id:'airspace', viewport:true, refresh:900,   // 15 min: TFRs/stadium events move, so stationary sessions stay fresh
   loader: async ()=>{
-    const env=viewEnv();
-    const q=(svc,fields,where)=>`https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/${svc}/FeatureServer/0/query`
-      +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
-      +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&maxAllowableOffset=0.004&outFields=${fields}`   // ~¼ mi generalisation halves the payload — only edge distance is used
-      +(where?`&where=${encodeURIComponent(where)}`:'')+`&f=geojson`;
-    const [cls,def,sua,nsufr,stad]=await Promise.all([
-      getJSON(q('Class_Airspace','NAME,CLASS,LOCAL_TYPE',"CLASS IN ('B','C','D') OR LOCAL_TYPE='CLASS_E2'"),{timeout:10000}).catch(()=>null),   // heavy one — server-side filter keeps Class-E5 off the wire
-      getJSON(q('National_Defense_Airspace_TFR_Areas','NAME'),{timeout:9000}).catch(()=>null),
-      getJSON(q('Special_Use_Airspace','NAME,TYPE_CODE,LOWER_VAL'),{timeout:10000}).catch(()=>null),
-      getJSON(q('Part_Time_National_Security_UAS_Flight_Restrictions','Facility,Floor'),{timeout:9000}).catch(()=>null),
-      getJSON(q('Stadiums','NAME'),{timeout:9000}).catch(()=>null)]);
-    const bad=r=>r==null||r.error||!Array.isArray(r.features);   // ArcGIS answers 200 with {error} under load — NOT "no airspace here"
-    if(bad(cls) || [cls,def,sua,nsufr,stad].every(bad)) throw new Error('airspace feeds unreachable');   // throw = keep last-good + retry; a clean [] is a real empty area
+    const fc=await rmhiqFC(viewEnv(),'asp-class,asp-defense-tfr,asp-sua,asp-nsufr,asp-stadiums');   // ONE hub call replaces five FAA services; throw = keep last-good + retry; a clean [] is a real empty area
     const feats=[];
     const push=(geom,props)=>{ if(geom) feats.push({type:'Feature',geometry:geom,properties:props}); };
     const CTRL={B:'#5b8def',C:'#c06ad0',D:'#5b8def'};   // identity palette, never verdict colors (see README)
-    ((cls&&cls.features)||[]).forEach(f=>{ const p=f.properties||{},cl=p.CLASS;   // controlled airspace B/C/D + surface-E2
-      if(!(/^[BCD]$/.test(cl)||p.LOCAL_TYPE==='CLASS_E2')||!f.geometry) return;
-      push(f.geometry,{sev:'ctrl',cls:cl,code:cl,name:p.NAME||'',_col:CTRL[cl]||'#c06ad0'}); });
-    ((def&&def.features)||[]).forEach(f=>push(f.geometry,{sev:'hard',cls:'DEF',code:'DEF',   // defense TFRs — hard no-fly (violet)
-      name:(f.properties&&f.properties.NAME)||'',_col:'#7c5cff'}));
     const SUA={P:['hard','PROH','#7c5cff'],R:['caution','RSTD','#22d3ee'],   // P hard · R conditional · MOA/W/A/D advisory
       MOA:['advisory','MOA','#8fa3bf'],W:['advisory','WARN','#8fa3bf'],A:['advisory','ALRT','#8fa3bf'],D:['advisory','DNGR','#8fa3bf']};
-    ((sua&&sua.features)||[]).forEach(f=>{ const p=f.properties||{},t=SUA[p.TYPE_CODE]; if(!t||!f.geometry) return;
-      if(floorFt(p.LOWER_VAL)>SPEC.regFt) return;   // floor above the drone band → irrelevant
-      push(f.geometry,{sev:t[0],cls:p.TYPE_CODE,code:t[1],name:p.NAME||'',_col:t[2]}); });
-    ((nsufr&&nsufr.features)||[]).forEach(f=>{ const p=f.properties||{};   // part-time security UAS zones — hard no-fly
-      if(floorFt(p.Floor)>SPEC.regFt) return;
-      push(f.geometry,{sev:'hard',cls:'NSUFR',code:'NSUF',
-        name:p.Facility||'security zone',_col:'#7c5cff'}); });
-    ((stad&&stad.features)||[]).forEach(f=>{ const g=f.geometry; if(!g||g.type!=='Point') return;   // stadium points → 3 nm (3.452 mi) TFR rings, conditional
-      push({type:'Polygon',coordinates:[circleRing(g.coordinates[1],g.coordinates[0],3.452,48)]},
-        {sev:'caution',cls:'STDM',code:'STDM',name:(f.properties&&f.properties.NAME)||'stadium',_col:'#22d3ee'}); });
+    fc.features.forEach(f=>{ const p=f.properties||{},g=f.geometry;
+      if(!g) return;
+      switch(p.layer){
+        case 'asp-class':{ const cl=p.CLASS;   // controlled airspace B/C/D + surface-E2
+          if(!(/^[BCD]$/.test(cl)||p.LOCAL_TYPE==='CLASS_E2')) return;
+          push(g,{sev:'ctrl',cls:cl,code:cl,name:p.NAME||'',_col:CTRL[cl]||'#c06ad0'}); break; }
+        case 'asp-defense-tfr':   // defense TFRs — hard no-fly (violet)
+          push(g,{sev:'hard',cls:'DEF',code:'DEF',name:p.NAME||'',_col:'#7c5cff'}); break;
+        case 'asp-sua':{ const t=SUA[p.TYPE_CODE]; if(!t) return;
+          if(floorFt(p.LOWER_VAL)>SPEC.regFt) return;   // floor above the drone band → irrelevant
+          push(g,{sev:t[0],cls:p.TYPE_CODE,code:t[1],name:p.NAME||'',_col:t[2]}); break; }
+        case 'asp-nsufr':   // part-time security UAS zones — hard no-fly
+          if(floorFt(p.Floor)>SPEC.regFt) return;
+          push(g,{sev:'hard',cls:'NSUFR',code:'NSUF',name:p.Facility||'security zone',_col:'#7c5cff'}); break;
+        case 'asp-stadiums':   // stadium points → 3 nm (3.452 mi) TFR rings, conditional
+          if(g.type!=='Point') return;
+          push({type:'Polygon',coordinates:[circleRing(g.coordinates[1],g.coordinates[0],3.452,48)]},
+            {sev:'caution',cls:'STDM',code:'STDM',name:p.NAME||'stadium',_col:'#22d3ee'}); break;
+      }
+    });
     return {type:'FeatureCollection',features:feats};
   }
 });
@@ -311,15 +328,9 @@ defLayer({   // FAA AIRSPACE LISTING (cards + zones/restrict gates) — CONTEXT;
 defLayer({   // NPS lands — drones can't launch/land/operate in a unit → hard no-fly listing
   id:'nps', viewport:true,
   loader: async ()=>{
-    const env=viewEnv();
-    const url='https://services1.arcgis.com/fBc8EJBxQRMcHlei/ArcGIS/rest/services/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2/query'
-      +`?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326`
-      +`&spatialRel=esriSpatialRelIntersects&returnGeometry=true&maxAllowableOffset=0.0015`
-      +'&outFields=UNIT_NAME,UNIT_TYPE&f=geojson';
-    const j=await getJSON(url,{timeout:15000});
-    if(j.error||!Array.isArray(j.features)) throw new Error('NPS query failed');   // ArcGIS error-in-200 is NOT "no parks here" — throw, keep last-good
+    const fc=await rmhiqFC(viewEnv(),'nps');   // throw = keep last-good + retry, never "no parks here"
     const feats=[];
-    (j.features||[]).forEach(f=>{ if(!f.geometry) return; const p=f.properties||{};
+    fc.features.forEach(f=>{ if(!f.geometry) return; const p=f.properties||{};
       feats.push({type:'Feature',geometry:f.geometry,properties:{
         name:p.UNIT_NAME||'',utype:p.UNIT_TYPE||''}}); });
     return {type:'FeatureCollection',features:feats};
@@ -756,13 +767,13 @@ const ALTS_UP=(()=>{const a=[];for(let f=0;f<=SPEC.regFt;f+=50)a.push(f);return 
 const ALTS=[...ALTS_UP].reverse();   // …and descending (grid row order)
 const FC_HOURS=3;   // forecast columns beyond NOW
 const KP_URL='https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json';
-const FAA_GIS='https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services';   // official AIS, CORS-open
-const gisUrl=(svc,lat,lon,rng,fields)=>`${FAA_GIS}/${svc}/FeatureServer/0/query`
+const FAA_GIS='https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services';   // official AIS — the LAANC fallback ONLY (see getLaancCeil)
+const aspUrl=(lat,lon,rng)=>`${FAA_GIS}/FAA_UAS_FacilityMap_Data/FeatureServer/0/query`
   +`?geometry=${lon.toFixed(3)},${lat.toFixed(3)}&geometryType=esriGeometryPoint&inSR=4326`
   +`&spatialRel=esriSpatialRelIntersects&distance=${rng}&units=esriSRUnit_StatuteMile`
-  +`&outFields=${fields}&returnGeometry=false&f=json`;
-const aspUrl=(lat,lon,rng)=>gisUrl('FAA_UAS_FacilityMap_Data',lat,lon,rng,'CEILING,UNIT');   // LAANC grid
-const defUrl=(lat,lon,rng)=>gisUrl('National_Defense_Airspace_TFR_Areas',lat,lon,rng,'NAME');   // defense TFRs
+  +`&outFields=CEILING,UNIT&returnGeometry=false&f=json`;
+const ptEnv=(lat,lon,mi)=>{ const {dLat,dLon}=geoDeltas(mi,lat);   // ±mi box around a point — the hub bbox for the FAA gate queries (a superset of the old mi-radius disc, so the answer only gets MORE conservative)
+  return [lon-dLon,lat-dLat,lon+dLon,lat+dLat].map(n=>n.toFixed(3)).join(','); };
 const PRES_LEVELS=[1000,975,950,925,900,850,800,700];   // pressure levels scanned for cloud decks
 const CLOUD_FEW_PCT=12;   // lowest level with ≥ this % cover = the base
 function aloftUrl(lat,lon){
@@ -835,9 +846,31 @@ async function getKp(){   // SWPC planetary-Kp: full time-sorted 3 h bin list, s
   }).filter(x=>!isNaN(x.ms)&&!isNaN(x.kp)).sort((a,b)=>a.ms-b.ms);
   return rows.length?{rows}:null;
 }
-// FAA gate = TWO point queries with different lifetimes (LAANC near-static, defense TFRs hours-fresh).
+// FAA gate = TWO rmhiq bbox queries with different lifetimes (LAANC near-static, defense TFRs hours-fresh).
 // Both are LEGAL warnings: anything that could understate a restriction THROWS — never reads "clear".
+let _laancReadyAt=0;   // last time /api/laanc confirmed a COMPLETED national walk
+const LAANC_READY_TTL=6*60*60*1000;   // re-confirm on the LAANC cache's own cycle
+async function laancReady(){   // the hub fills its 380k-cell grid in daily slices — a PARTIAL walk in range would
+  // overstate the ceiling (min over a subset), so its laanc layer is trusted only once one full
+  // national walk has completed: `confirmed` is stamped by nothing else. Hub unreachable → THROW
+  // (unverified, same as an FAA outage) — only a definitive "fill incomplete" answers false.
+  if(Date.now()-_laancReadyAt<LAANC_READY_TTL) return true;
+  const j=await getJSON(`${RMHIQ}/api/laanc`,{timeout:7000});
+  if(j&&j.confirmed!=null){ _laancReadyAt=Date.now(); return true; }
+  return false;
+}
 async function getLaancCeil(lat,lon,rng){
+  if(!(await laancReady())) return getLaancCeilFAA(lat,lon,rng);   // grid mid-fill → the FAA source directly, until the fill lands
+  const fc=await rmhiqFC(ptEnv(lat,lon,rng),'laanc',7000);
+  let ceil=SPEC.regFt;   // no grid cells in range = uncontrolled → the Part 107 ceiling
+  for(const f of fc.features){
+    const c=f.properties&&f.properties.CEILING;   // the hub stores no UNIT — it's the constant "Feet"
+    if(!Number.isFinite(c)||c<0||c>10000) throw new Error('laanc cell has no usable ceiling');
+    ceil=Math.min(ceil,c);   // worst grid cell in range wins
+  }
+  return {ceilFt:ceil};
+}
+async function getLaancCeilFAA(lat,lon,rng){   // direct-FAA fallback — self-retires once the hub's laanc fill completes
   const grid=await getJSON(aspUrl(lat,lon,rng),{timeout:7000});
   if(grid.error||!Array.isArray(grid.features)) throw new Error('airspace grid query failed');
   if(grid.exceededTransferLimit) throw new Error('airspace result truncated');
@@ -852,10 +885,9 @@ async function getLaancCeil(lat,lon,rng){
   return {ceilFt:ceil};
 }
 async function getDefense(lat,lon,rng){
-  const def=await getJSON(defUrl(lat,lon,rng),{timeout:7000});
-  if(def.error||!Array.isArray(def.features)) throw new Error('defense-airspace query failed');
-  if(def.exceededTransferLimit) throw new Error('defense-airspace result truncated');
-  return {active:def.features.length>0};
+  if(!(await rmhiqFresh('asp-defense-tfr'))) throw new Error('rmhiq defense-tfr source stale');   // a hub that can't reach FAA must not read "no TFR"
+  const fc=await rmhiqFC(ptEnv(lat,lon,rng),'asp-defense-tfr',7000);
+  return {active:fc.features.length>0};
 }
 function makeProfile(pts){   // wind(ft) → mph, linearly interpolating the sparse model levels
   const p=(pts||[]).filter(x=>x&&x.w!=null&&!isNaN(x.w)).sort((a,b)=>a.h-b.h);
