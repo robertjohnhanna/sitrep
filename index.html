@@ -627,11 +627,7 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
       cards.push(mkCard('','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid',rangeTxt,false));   // reduced ceiling — the chart caps the grid
   }
 
-  const kpNow=FLY.detail?FLY.detail.kpNow:null;
-  if(gates.kp){   // SPACE WEATHER (pinned) — a view of the kp gate; only a grounding storm (Kp ≥ 7) shows
-    cards.push(mkCard('danger','🧲','SPACE WEATHER','Kp '+Math.round(kpNow)+' · geomagnetic storm',
-      'GPS / compass unreliable',true));
-  }
+  // (a Kp ≥ 7 storm still grounds via the kp gate and shows as the chart's KP<n> code — no separate card)
 
   // DATA HEALTH (pinned) — feeds classified by the ONE feedTier() rule
   const redFeeds=[], staleFeeds=[];
@@ -1050,7 +1046,7 @@ function flyComputeDetail(){   // apply every gate and build the chart render mo
   const gustCells=grid.map(g=>({v:one(g.gustMph), dir:g.windDir!=null?compass(g.windDir):''}));   // gust + 8-point direction; a gust grounding shows on the SFC row instead
   return {board:{colLabels,gustCells,altRows},
     aspCapFt, aspUnknown:asp==null,   // FAA gate value + unknown flag (read by the FAA card + gates)
-    kpNow:kpAt(0),                    // NOW Kp (read by the kp gate + both Kp-showing cards)
+    kpNow:kpAt(0),                    // NOW Kp (read by the kp gate → chart KP code)
     wxNow,
     grid:grid.map(g=>({n:g.n,maxFly:g.maxFly,grounded:g.grounded,reason:g.reason,reasonAlt:g.reasonAlt,trfcAlt:g.trfcAlt}))};
 }
