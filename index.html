@@ -19,6 +19,7 @@
     --bg:#000000; --line:#1a2730;
     --ink:#d6e2ee; --ink-dim:#748596;
     --go:#2fe07a; --nogo:#ff4455;   /* the two verdict colors — GO green / NO-GO red */
+    --warn:#ffd43b;   /* a yellow accent for advisory card headings (weak GPS · stale data) — NOT a verdict tier */
     --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
     --safe-top:env(safe-area-inset-top,0px);
     --safe-bottom:env(safe-area-inset-bottom,0px);
@@ -80,13 +81,14 @@
     padding:4px 0 calc(var(--safe-bottom) + 6px);-webkit-overflow-scrolling:touch;
     flex:1 1 0;min-height:0}   /* bottom HALF — scrolls internally */
   .sit-row{flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:8px 12px;font-size:13px;   /* no-shrink keeps row height stable between fit and scroll states */
-    min-height:62px;border-bottom:1px solid #10171f}
+    min-height:48px;border-bottom:1px solid #10171f}   /* 48 not 62 — two lines now, not three */
   .sit-row .tx{flex:1;min-width:0;line-height:1.34;display:flex;flex-direction:column;justify-content:center}
   .sit-row .tx .s1,.sit-row .tx .s2{display:block;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}   /* overlong lines truncate with … */
   .sit-row .tx .s1{color:var(--ink);letter-spacing:.3px}
   .sit-row .tx .s2{color:var(--ink-dim);font-size:12px}
   .sit-row.danger .s1{color:var(--nogo)}     /* red no-go card */
+  .sit-row.warn .s1{color:var(--warn)}       /* yellow heading — advisory only (weak GPS · stale data), no status change */
   .u{letter-spacing:0;font-style:normal}   /* unit token keeps its own spacing in the upper-cased body */
 
   /* phone landscape ONLY — too short to stack, so chart LEFT / cards RIGHT; gated by height ≤500px (phones; iPad Mini is 744) + coarse pointer */
@@ -514,28 +516,27 @@ const acSub=f=>{const p=f.properties;   // line-2 cascade — never '?', blank, 
   return escapeHtml(p.desc||type||p.op||reg||CAT_LABEL[p.cat]||SRC_LABEL(p.src)||'unknown');};   // desc → type → operator → tail reg → category → source → unknown
 const AIRCRAFT_COLOR='#eaf1f8';   // the ONE aircraft identity color (white) — tints the callsign line
 const acTail=(f,n,fb)=>cut(f.properties.flight||f.properties.hex||fb||'?',n);   // callsign → hex → fallback, clipped
+const airTitle=(name,sfx)=>{ const n=cut(name||'',24);   // "{name} {type}" without doubling — if the FAA name already spells the type word, keep the name as-is
+  return n ? (new RegExp('\\b'+sfx.split(' ')[0]+'\\b','i').test(n) ? n : n+' '+sfx) : sfx; };
 const CATS=[
   {src:'nearair', hazard:false, air:true, cls:()=>'',   // ALL aircraft, military included — white identity, red L1 when low in the ring
    head:f=>{ const t=acTail(f,12), s=acSub(f); return s&&s!=='unknown'? t+' · '+s : t; },   // "N884JT · Cessna 172"
    detail:ALT},
   {src:'airspace', hazard:true, filter:f=>f.properties.sev==='hard'||f.properties.sev==='caution',   // restrictions that gate a drone
    cls:(f,inside)=>(inside&&f.properties.sev==='hard')?'danger':'',   // red only when you're INSIDE a hard zone (PROH/NSUFR/DEF ground overhead, not from nearby); conditional R/STDM + near = neutral awareness
-   head:f=>{ const name=cut(f.properties.name||'',24),   // name-led: "Ben Hill Griffin Stadium TFR"
-     sfx={DEF:'defense airspace',NSUFR:'security no-fly',P:'prohibited area',R:'restricted area',STDM:'TFR'}[f.properties.cls]||'airspace';
-     return name? name+' '+sfx : sfx; },
+   head:f=>airTitle(f.properties.name,   // name-led: "Ben Hill Griffin Stadium TFR"
+     {DEF:'defense TFR',NSUFR:'security no-fly',P:'prohibited area',R:'restricted area',STDM:'TFR'}[f.properties.cls]||'restricted airspace'),
    detail:f=>f.properties.sev==='hard'?'drones prohibited'
      :f.properties.cls==='STDM'?'no-fly during events':'no-fly if active'},
   {src:'airspace', hazard:false, filter:f=>f.properties.sev==='advisory', cls:()=>'',   // MOA/W/A/D — awareness, not a drone no-fly
-   head:f=>{ const name=cut(f.properties.name||'',24),
-     sfx={MOA:'MOA',W:'warning area',A:'alert area',D:'danger area'}[f.properties.cls]||'special-use airspace';
-     return name? name+' '+sfx : sfx; },
+   head:f=>airTitle(f.properties.name,
+     {MOA:'MOA',W:'warning area',A:'alert area',D:'danger area'}[f.properties.cls]||'special-use airspace'),
    detail:()=>'advisory only'},
   {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl',   // controlled B/C/D+E2 — fly WITH LAANC
    cls:(f,inside)=>{ const d=FLY.detail;   // red when you're INSIDE it and LAANC caps or grounds you (aspCapFt < 400) — matches the chart's FAA code; a full 400 ceiling stays neutral
      return (inside && d && !d.aspUnknown && d.aspCapFt<SPEC.regFt) ? 'danger':''; },
-   head:f=>{ const name=cut(f.properties.name||'',24),   // "Moffett Fld Class D"
-     cl=/^[BCDE]$/.test(f.properties.cls)?'Class '+f.properties.cls:'controlled';
-     return name? name+' '+cl : cl+' airspace'; },
+   head:f=>{ const c=f.properties.cls==='E'?'E2':f.properties.cls;   // class E here is always surface E2 (E5 is filtered out); "Moffett Fld Class D"
+     return airTitle(f.properties.name, /^(B|C|D|E2)$/.test(c)?'Class '+c:'controlled airspace'); },
    detail:()=>'authorization (LAANC)'},
   {src:'nps', hazard:true, cls:(f,inside)=>inside?'danger':'',   // park land: red ON it (chart grounds), neutral near it
    head:f=>cut(f.properties.name||'NPS LAND',24),
@@ -611,7 +612,7 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
   // (no FAA card — a reduced or zero LAANC ceiling is carried by the chart's FAA code, the verdict, and any in-range airspace card)
 
   if(USER.acc!=null && USER.acc>ACC_BAD_M)   // WEAK GPS SIGNAL (pinned) — neutral heads-up; the fix still flies, it's just imprecise
-    cards.push(mkCard('','WEAK GPS SIGNAL','±'+Math.round(USER.acc*M_TO_FT)+U(' ft')+' — position may be off',false));
+    cards.push(mkCard('warn','WEAK GPS SIGNAL','±'+Math.round(USER.acc*M_TO_FT)+U(' ft')+' — position may be off',false));   // 'warn' = yellow heading only; ranks as a general card
 
   // (a Kp ≥ 7 storm still grounds via the kp gate and shows as the chart's KP<n> code — no separate card)
 
@@ -630,8 +631,8 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
   const dataFeeds=[...redFeeds,...staleFeeds];
   if(dataFeeds.length){
     const red=redFeeds.length>0;
-    cards.push(mkCard(red?'danger':'', red?'DATA NOT LOADED':'DATA UNVERIFIED',
-      cut(dataFeeds.join(' · '),30)+' · '+(red?'acquiring — verify before flying':'retrying every 5 s'), red));   // never-loaded reds; stale is neutral info
+    cards.push(mkCard(red?'danger':'warn', red?'DATA NOT LOADED':'DATA UNVERIFIED',
+      cut(dataFeeds.join(' · '),30)+' · '+(red?'acquiring — verify before flying':'retrying every 5 s'), red));   // never-loaded reds (grounds); stale = yellow heading only, no status change
   }
 
   // in-ring item cards — one per feature
