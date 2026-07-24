@@ -622,11 +622,7 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
       label:Math.max(0,Math.round(a.agl))+U(' ft')+(a.ground==null?'':' AGL')});
   });
 
-  if(FLY.detail && !FLY.detail.aspUnknown){   // FAA CEILING (pinned) — a reduced-but-flyable LAANC ceiling; a 0-ceiling no-fly is left to the chart's FAA code + any red in-range airspace card
-    const faaCap=FLY.detail.aspCapFt;
-    if(faaCap>=0 && faaCap<SPEC.regFt)
-      cards.push(mkCard('','🛑','FAA CEILING '+faaCap+U(' ft'),'LAANC grid','within '+RNG.mi.toFixed(1)+U(' mi'),false));   // reduced ceiling — the chart caps the grid
-  }
+  // (no FAA card — a reduced or zero LAANC ceiling is carried by the chart's FAA code, the verdict, and any in-range airspace card)
 
   if(USER.acc!=null && USER.acc>ACC_BAD_M)   // WEAK GPS SIGNAL (pinned) — neutral heads-up; the fix still flies, it's just imprecise
     cards.push(mkCard('','🛰️','WEAK GPS SIGNAL','±'+Math.round(USER.acc*M_TO_FT)+U(' ft')+' — position may be off','',false));
