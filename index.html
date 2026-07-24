@@ -427,7 +427,7 @@ function initLayers(){   // per-layer runtime state (features + fetch bookkeepin
   });
 }
 
-const mkCard=(cls,ic,l1,l2,l3,hazard,col)=>({cls,ic,l1,l2,l3,hazard,col});   // cls = display color (from gate sev) · hazard = RANKING only, never a verdict vote · col = identity hex · mi (set later) = range sort key
+const mkCard=(cls,l1,l2,hazard,col)=>({cls,l1,l2,hazard,col});   // 2-line card: L1 headline · L2 detail · cls = display color · hazard = RANKING only, never a verdict vote · col = identity hex · mi (set later) = range sort key
 
 // 3. location — GPS only, no IP fallback; position leaves the browser only as lat/lon params to the keyless feeds (pipeline: README)
 let sitrepTimer=null;
@@ -512,34 +512,34 @@ const acSub=f=>{const p=f.properties;   // line-2 cascade — never '?', blank, 
   const tail=String(p.flight||p.hex||'').trim().toUpperCase();
   const reg=p.reg&&p.reg.toUpperCase()!==tail?p.reg:'';
   return escapeHtml(p.desc||type||p.op||reg||CAT_LABEL[p.cat]||SRC_LABEL(p.src)||'unknown');};   // desc → type → operator → tail reg → category → source → unknown
-const AIRCRAFT_COLOR='#eaf1f8';   // the ONE aircraft identity color (white) — tints the tail number
-const AC_ICON='✈️';   // every contact is just an aircraft — no rotorcraft distinction
+const AIRCRAFT_COLOR='#eaf1f8';   // the ONE aircraft identity color (white) — tints the callsign line
 const acTail=(f,n,fb)=>cut(f.properties.flight||f.properties.hex||fb||'?',n);   // callsign → hex → fallback, clipped
 const CATS=[
-  {src:'nearair', hazard:false, air:true, icon:AC_ICON, cls:()=>'',   // ALL aircraft, military included — white identity
-   head:f=>acTail(f,12),
-   sub:acSub, detail:ALT},
+  {src:'nearair', hazard:false, air:true, cls:()=>'',   // ALL aircraft, military included — white identity, red L1 when low in the ring
+   head:f=>{ const t=acTail(f,12), s=acSub(f); return s&&s!=='unknown'? t+' · '+s : t; },   // "N884JT · Cessna 172"
+   detail:ALT},
   {src:'airspace', hazard:true, filter:f=>f.properties.sev==='hard'||f.properties.sev==='caution',   // restrictions that gate a drone
-   icon:f=>({DEF:'🛡️',NSUFR:'🔒',P:'⛔',STDM:'🏟️',R:'⚠️'}[f.properties.cls]
-     ||(f.properties.sev==='hard'?'⛔':'⚠️')),
    cls:(f,inside)=>(inside&&f.properties.sev==='hard')?'danger':'',   // red only when you're INSIDE a hard zone (PROH/NSUFR/DEF ground overhead, not from nearby); conditional R/STDM + near = neutral awareness
-   head:f=>({DEF:'DEFENSE AIRSPACE',NSUFR:'SECURITY NO-FLY',P:'PROHIBITED AREA',R:'RESTRICTED AREA',
-     STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
-   sub:f=>cut(f.properties.name||'—',26),
+   head:f=>{ const name=cut(f.properties.name||'',24),   // name-led: "Ben Hill Griffin Stadium TFR"
+     sfx={DEF:'defense airspace',NSUFR:'security no-fly',P:'prohibited area',R:'restricted area',STDM:'TFR'}[f.properties.cls]||'airspace';
+     return name? name+' '+sfx : sfx; },
    detail:f=>f.properties.sev==='hard'?'drones prohibited'
      :f.properties.cls==='STDM'?'no-fly during events':'no-fly if active'},
-  {src:'airspace', hazard:false, filter:f=>f.properties.sev==='advisory', icon:'🎯', cls:()=>'',   // MOA/W/A/D — awareness, not a drone no-fly
-   head:f=>({MOA:'MILITARY OPS AREA',W:'WARNING AREA',A:'ALERT AREA',D:'DANGER AREA'}[f.properties.cls]||'SPECIAL-USE AIRSPACE'),
-   sub:f=>cut(f.properties.name||'—',26), detail:()=>'advisory only'},
-  {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl', icon:'🗼',   // controlled B/C/D+E2 — fly WITH LAANC
+  {src:'airspace', hazard:false, filter:f=>f.properties.sev==='advisory', cls:()=>'',   // MOA/W/A/D — awareness, not a drone no-fly
+   head:f=>{ const name=cut(f.properties.name||'',24),
+     sfx={MOA:'MOA',W:'warning area',A:'alert area',D:'danger area'}[f.properties.cls]||'special-use airspace';
+     return name? name+' '+sfx : sfx; },
+   detail:()=>'advisory only'},
+  {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl',   // controlled B/C/D+E2 — fly WITH LAANC
    cls:(f,inside)=>{ const d=FLY.detail;   // red when you're INSIDE it and LAANC caps or grounds you (aspCapFt < 400) — matches the chart's FAA code; a full 400 ceiling stays neutral
      return (inside && d && !d.aspUnknown && d.aspCapFt<SPEC.regFt) ? 'danger':''; },
-   head:f=>({B:'CLASS B AIRSPACE',C:'CLASS C AIRSPACE',D:'CLASS D AIRSPACE',E:'CLASS E AIRSPACE'}[f.properties.cls]||'AIRSPACE'),
-   sub:f=>cut(f.properties.name||'—',26),
+   head:f=>{ const name=cut(f.properties.name||'',24),   // "Moffett Fld Class D"
+     cl=/^[BCDE]$/.test(f.properties.cls)?'Class '+f.properties.cls:'controlled';
+     return name? name+' '+cl : cl+' airspace'; },
    detail:()=>'authorization (LAANC)'},
-  {src:'nps', hazard:true, icon:'🏞️', cls:(f,inside)=>inside?'danger':'',   // park land: red ON it (chart grounds), neutral near it
-   head:f=>cut(f.properties.name||'NPS LAND',20),
-   sub:()=>'drones prohibited', detail:f=>cut(f.properties.utype||'NPS unit',18)},
+  {src:'nps', hazard:true, cls:(f,inside)=>inside?'danger':'',   // park land: red ON it (chart grounds), neutral near it
+   head:f=>cut(f.properties.name||'NPS LAND',24),
+   detail:()=>'drones prohibited'},
 ];
 function catItems(cfg,lat,lon,rMi){   // category features in range: point by radius · polygon if inside OR edge ≤ rMi
   let items=featsIn(cfg.src); if(cfg.filter) items=items.filter(cfg.filter);
@@ -597,24 +597,21 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
   }
   const lat=USER.lat, lon=USER.lon;
   const rows=[];
-  const row=c=>rows.push(   // card record → 2-line info row, no icon; line 2 merges the old sub + detail (· joined); col is a sanitised identity hex
+  const row=c=>rows.push(   // card record → 2-line info row, no icon: L1 headline (identity) · L2 detail; col is a sanitised identity hex
     `<div class="sit-row${c.cls?' '+c.cls:''}"><span class="tx">`+
     `<span class="s1"${c.col?` style="color:${c.col}"`:''}>${c.l1||''}</span>`+
-    `<span class="s2">${[c.l2,c.l3].filter(Boolean).join(' · ')}</span></span></div>`);
+    `<span class="s2">${c.l2||''}</span></span></div>`);
   const dirMi=(la,lo)=>compass(bearing(lat,lon,la,lo))+' '+fmtMi(havMi(lat,lon,la,lo));   // direction + distance from you
 
   const cards=[];
 
-  const breachInfo=new Map();   // LOW AIRCRAFT tags: feature → {label}, straight from the shared traffic math
-  tr.low.forEach(a=>{           // (object-keyed — an id string would collide for anonymous contacts)
-    breachInfo.set(a.f,{
-      label:Math.max(0,Math.round(a.agl))+U(' ft')+(a.ground==null?'':' AGL')});
-  });
+  const lowPlanes=new Set();   // features < 900 ft AGL in the 1 mi ring — their card is a plain aircraft card with a RED L1 (object-keyed; an id string would collide for anonymous contacts)
+  tr.low.forEach(a=>lowPlanes.add(a.f));
 
   // (no FAA card — a reduced or zero LAANC ceiling is carried by the chart's FAA code, the verdict, and any in-range airspace card)
 
   if(USER.acc!=null && USER.acc>ACC_BAD_M)   // WEAK GPS SIGNAL (pinned) — neutral heads-up; the fix still flies, it's just imprecise
-    cards.push(mkCard('','🛰️','WEAK GPS SIGNAL','±'+Math.round(USER.acc*M_TO_FT)+U(' ft')+' — position may be off','',false));
+    cards.push(mkCard('','WEAK GPS SIGNAL','±'+Math.round(USER.acc*M_TO_FT)+U(' ft')+' — position may be off',false));
 
   // (a Kp ≥ 7 storm still grounds via the kp gate and shows as the chart's KP<n> code — no separate card)
 
@@ -633,26 +630,18 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
   const dataFeeds=[...redFeeds,...staleFeeds];
   if(dataFeeds.length){
     const red=redFeeds.length>0;
-    cards.push(mkCard(red?'danger':'','📡', red?'DATA NOT LOADED':'DATA UNVERIFIED',
-      cut(dataFeeds.join(' · '),30), red?'acquiring — verify before flying':'retrying every 5 s', red));   // never-loaded reds; stale is neutral info
+    cards.push(mkCard(red?'danger':'', red?'DATA NOT LOADED':'DATA UNVERIFIED',
+      cut(dataFeeds.join(' · '),30)+' · '+(red?'acquiring — verify before flying':'retrying every 5 s'), red));   // never-loaded reds; stale is neutral info
   }
 
-  // in-ring item cards — one per feature; a low plane's OWN card transforms (one card per plane, never two)
+  // in-ring item cards — one per feature
   const items=[];
   CATS.forEach(cfg=>catItems(cfg,lat,lon,rangeMi).forEach(f=>{
     const g=f.geometry; if(!g) return;
     const inside=g.type!=='Point'&&pointInFeature(f,lon,lat);   // inside → "overhead", range 0
-    let cls=cfg.cls?cfg.cls(f,inside):'', det=null, headOv=null, subOv=null, icOv=null, hazardOv=null;
-    const bi=cfg.air?breachInfo.get(f):null;
-    if(bi){   // LOW AIRCRAFT override — any manned plane < 900 ft AGL in the 1 mi ring reds, whether it caps or grounds
-      icOv=AC_ICON; hazardOv=true; headOv='LOW AIRCRAFT';
-      cls='danger';
-      const idTxt=acSub(f);   // keep the identity data the headline displaced: tail · original line 2
-      subOv='<span style="color:'+AIRCRAFT_COLOR+'">'+acTail(f,12,'aircraft')+'</span>'
-        +(idTxt&&idTxt!=='unknown'?' · '+idTxt:'');   // skip a bare "unknown" — it adds nothing
-      det=bi.label;   // '254 ft AGL'
-    }
-    const hazard=cls==='danger'?true:(hazardOv!=null?hazardOv:cfg.hazard);   // any red (no-go) card ranks at the top, even from a hazard:false source (controlled airspace)
+    let cls=cfg.cls?cfg.cls(f,inside):'';
+    if(cfg.air && lowPlanes.has(f)) cls='danger';   // low plane in the ring → plain aircraft card with a red L1 (nothing else changes)
+    const hazard=(cls==='danger'&&!cfg.air)?true:cfg.hazard;   // a red AIRSPACE card ranks at the top (even from hazard:false controlled airspace); a red aircraft stays a general card, sorted by range
     const tier=hazard?(cls==='danger'?0:1):2;
     let pt, mi;
     if(g.type==='Point'){ pt=g.coordinates; mi=havMi(lat,lon,pt[1],pt[0]); }
@@ -661,7 +650,7 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
       pt=ne.pt; mi=inside?0:ne.mi;   // nearest edge drives label + sorting
     }
     if(!pt) return;
-    items.push({cfg,f,pt,cls,tier,inside,mi,det,headOv,subOv,icOv,hazardOv});
+    items.push({cfg,f,pt,cls,tier,inside,mi,hazard});
   }));
   const nearestAsp=new Map();   // a named zone (esp. Class B) arrives as many shelf polygons — keep the nearest per class+name
   const aspKey=it=>(it.f.properties.cls||'')+'|'+(it.f.properties.name||'');
@@ -670,16 +659,14 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
   const shown=items.filter(it=>it.cfg.src!=='airspace'||nearestAsp.get(aspKey(it))===it);
   shown.sort((a,z)=>a.tier-z.tier||a.mi-z.mi);   // warnings first, then range
   const ITEM_CAP=14;
-  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,mi,det,headOv,subOv,icOv,hazardOv})=>{
-    const detTxt=det!=null?det:(cfg.detail?cfg.detail(f):'');
-    const ic=icOv!=null?icOv:(typeof cfg.icon==='function'?cfg.icon(f):cfg.icon);
-    const head=headOv!=null?headOv:cfg.head(f);
-    const sub=subOv!=null?subOv:((cfg.sub?cfg.sub(f):'')||'—');
-    const rawCol=(head==='LOW AIRCRAFT')?null:cfg.src==='airspace'?f.properties._col:cfg.air?AIRCRAFT_COLOR:null;   // identity hex: zone color / white tail
+  shown.slice(0,ITEM_CAP).forEach(({cfg,f,pt,cls,inside,mi,hazard})=>{
+    const detTxt=cfg.detail?cfg.detail(f):'';
+    const head=cfg.head(f);
+    const rawCol=(cfg.air&&cls==='danger')?null:cfg.src==='airspace'?f.properties._col:cfg.air?AIRCRAFT_COLOR:null;   // low (red) aircraft drops the white tint so .danger reds L1; else identity color
     const col=/^#[0-9a-fA-F]{3,8}$/.test(rawCol||'')?rawCol:undefined;   // bare hex only — a feed can't inject markup
-    let l3=(inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:'');
-    if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }   // ground speed after the altitude
-    const card=mkCard(cls, ic, head, sub, l3, hazardOv!=null?hazardOv:cfg.hazard, col);
+    let l2=(inside?'overhead':dirMi(pt[1],pt[0]))+(detTxt?' · '+detTxt:'');
+    if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l2+=' · '+Math.round(toMph(s))+U(' mph'); }   // ground speed after the altitude
+    const card=mkCard(cls, head, l2, hazard, col);
     card.mi=mi; cards.push(card);   // range = the in-category sort key
   });
   // nearby context — objects beyond their ring but inside the DATA ring join `cards` as neutral general objects
@@ -706,15 +693,13 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
   ctx.filter(it=>it.cfg.src!=='airspace'||ctxAsp.get(ctxKey(it))===it)
      .sort((a,z)=>a.mi-z.mi).slice(0,CTX_CAP)
      .forEach(({cfg,f,pt,mi})=>{
-       const ic=typeof cfg.icon==='function'?cfg.icon(f):cfg.icon;
        const head=cfg.head(f);
-       const sub=(cfg.sub?cfg.sub(f):'')||'—';
        const detTxt=cfg.detail?cfg.detail(f):'';
-       let l3=dirMi(pt[1],pt[0])+(detTxt?' · '+detTxt:'');
-       if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l3+=' · '+Math.round(toMph(s))+U(' mph'); }
+       let l2=dirMi(pt[1],pt[0])+(detTxt?' · '+detTxt:'');
+       if(cfg.air){ const s=Number(f.properties.spd); if(isFinite(s)) l2+=' · '+Math.round(toMph(s))+U(' mph'); }
        const rawCol=cfg.src==='airspace'?f.properties._col:cfg.air?AIRCRAFT_COLOR:null;
        const col=/^#[0-9a-fA-F]{3,8}$/.test(rawCol||'')?rawCol:undefined;
-       const cc=mkCard('', ic, head, sub, l3, false, col);   // neutral general object
+       const cc=mkCard('', head, l2, false, col);   // neutral general object
        cc.mi=mi; cards.push(cc);   // range-sorts with the in-ring general items
      });
 
@@ -867,7 +852,7 @@ function hydrateAsp(){   // restore the persisted LAANC cache (validated, hard-T
 function persistAsp(){ store(ASP_CACHE_KEY,JSON.stringify(aspCache)); }
 
 // traffic — the ONE assessment shared by the chart's TRFC gate, the verdict's traffic gate, and the
-// LOW AIRCRAFT cards, so they can never disagree
+// red-L1 low-aircraft cards, so they can never disagree
 function assessTraffic(){
   if(USER.lat==null) return {ceilFt:Infinity,low:[]};
   const lat=USER.lat,lon=USER.lon;
