@@ -42,9 +42,12 @@ a card never votes), and `assessTraffic()` is the one traffic assessment they al
 | `nps` | rmhiq `/api/airspace` — layer `nps` | national-park lands (no-fly) | 25 mi box | on move |
 | `getAloft` | open-meteo `/v1/forecast` | winds to ~590 ft + gust + dir + cloud + vis (NOW..+3h) | point | ~15 s |
 | `getKp` | swpc.noaa.gov Kp forecast | planetary Kp (3-hr bins) | global | ~3 min |
-| `getLaancCeil` | rmhiq `/api/airspace` — layer `laanc` (FAA-direct fallback until the hub's first full grid walk) | drone grid ceiling | 1 mi box | cached 6 h |
-| `getDefense` | rmhiq `/api/airspace` — layer `asp-defense-tfr`, gated on hub freshness (`/api`) | hard no-fly (ceiling → 0) | 1 mi box | ~10 min |
+| `getLaancCeil` | rmhiq `/api/airspace` — layer `laanc` (FAA-direct fallback until the hub's first full grid walk) | drone grid ceiling **at your cell** | ~0.1 mi box (`OVERHEAD_MI`) | cached 6 h |
 | `ensureGroundElev` | open-meteo `/v1/elevation` | ground elevation for AGL | per ~0.7 mi cell | on demand |
+
+Defense TFRs are **not** a separate gate — they ride the `airspace` listing (layer `asp-defense-tfr`)
+and ground you the same way every other hard zone does: only when you're **inside** one
+(`flyRestriction`). No 1 mi defense query anymore.
 
 Winds are requested straight in **mph** — the unit shown and gated on — so no wind conversion
 is needed anywhere; aircraft ground speed still arrives in knots and is converted to mph.
@@ -54,11 +57,11 @@ rows, so no amount of client traffic can hit FAA's throttle. Hub reads keep cani
 unknown-≠-clear rules: a `truncated` FeatureCollection **throws** (a clipped listing must
 never read as complete coverage); `getLaancCeil` trusts the hub's `laanc` grid only after
 `/api/laanc` reports a completed national walk (`confirmed` set — mid-fill, a partial grid
-would overstate the ceiling) and falls back to the direct FAA point query until then;
-`getDefense` throws unless the hub's `asp-defense-tfr` source reports `fresh` on `/api`.
-Gate queries send a ±1 mi **box** where the FAA queries used a 1 mi disc — a superset, so
-results only get more conservative. Hub feature-bbox overlap is likewise a superset of true
-geometry intersection: a restriction can be over-included, never dropped.
+would overstate the ceiling) and falls back to the direct FAA point query until then.
+The LAANC query sends a tight ±`OVERHEAD_MI` **box** around you and takes the worst cell in
+it — your position's ceiling plus a GPS-error buffer, not the worst cell within a mile. Hub
+feature-bbox overlap is a superset of true geometry intersection: a restriction can be
+over-included, never dropped.
 
 ---
 
@@ -113,12 +116,18 @@ grounded  ⇢  capFt < 0   OR   any grounding gate below
 |---|---|---|---|
 | **Cloud** | winds-aloft cloud base | `cloudCapFt = base − 500` (500 ft below cloud) | caps |
 | **Wind aloft** | winds to ~590 ft | first level ≥ 27 mph, minus 50 | caps |
-| **FAA** | LAANC grid + defense TFR (1 mi query) | grid ceiling < 400 caps · ≤ 0 or defense active = no-fly | caps / grounds |
+| **FAA** | LAANC grid ceiling **at your cell** (`OVERHEAD_MI` box) | grid ceiling < 400 caps · ≤ 0 = no-fly | caps / grounds |
 | **Traffic** | in-ring aircraft AGL | manned plane < 900 ft AGL in the 1 mi ring, drone stays 500 below (NOW only) | caps / grounds |
 | **Gust** | surface gust | ≥ 27 mph | grounds |
 | **Visibility** | surface vis | < 3 SM | grounds |
 | **Kp** | SWPC Kp | ≥ 7 (G3+) | grounds |
-| **Restriction** | prohibited · security · NPS **under you** | inside the zone | grounds all hours |
+| **Restriction** | prohibited · security · **defense TFR** · NPS **under you** | inside the zone | grounds all hours |
+
+**Positional vs proximity.** Everything except **Traffic** is *positional* — it's about the column
+directly above where you stand: your LAANC cell, and whether you're **inside** a no-fly polygon
+(prohibited / security / defense TFR / NPS). You can fly straight up next to any of them; only
+being *over/inside* one grounds you. **Traffic** is the one *proximity* gate — a manned aircraft
+anywhere in the 1 mi ring is a collision risk, overhead or not.
 
 The cells are strictly binary — green fly / red can't — and **so is the verdict below**: there
 is no caution tier. A condition either grounds you (red no-go) or it doesn't (green go). Softer
@@ -160,12 +169,14 @@ express: a required feed that never verified, or no GPS fix. The clock stays whi
 
 | # | Category | Contents | Sort |
 |---|---|---|---|
-| 1 | Red no-go | **anything that caps or grounds you within 1 mi** — aircraft < 900 ft AGL · INSIDE a hard zone / NPS · a defense TFR in the ring · controlled airspace where LAANC caps or grounds you — plus a required feed not loaded | by range |
-| 2 | General | everything else < 25 mi — aircraft · advisory/near airspace · restricted/stadium · controlled airspace at a full ceiling · weak-GPS & stale-feed notices — interleaved, neutral | by range |
+| 1 | Red no-go | **anything that caps or grounds you** — an *overhead* restriction (INSIDE a hard zone: prohibited / security / defense TFR / NPS · or controlled airspace where your LAANC cell caps/grounds) · an *in-ring* aircraft < 900 ft AGL — plus a required feed not loaded | by range |
+| 2 | General | everything else < 25 mi — aircraft · advisory/near airspace · restricted/stadium · a hard zone you're only *near* · controlled airspace at a full ceiling · weak-GPS & stale-feed notices — interleaved, neutral | by range |
 
-**A card is red exactly when its subject caps or grounds you inside the 1 mi ring** — the same
-conditions that ground the chart. Everything else is neutral identity. (Weather/Kp and FAA ceiling
-have no card at all.) With **no GPS fix** the SITREP is a single red **NO GPS FIX** card and nothing else.
+**A card is red exactly when its subject caps or grounds you** — the same conditions that ground the
+chart: an *overhead* restriction (your LAANC cell, or a no-fly zone you're inside) or an *in-ring*
+aircraft. Being merely *near* a no-fly zone is neutral — you can fly straight up next to it.
+Everything else is neutral identity. (Weather/Kp and FAA ceiling have no card at all.) With
+**no GPS fix** the SITREP is a single red **NO GPS FIX** card and nothing else.
 
 Weather and space-weather gates (gust · vis · wind · cloud · Kp) have **no card** — they live only
 on the chart (reason codes) and in the verdict. FAA ceiling likewise: a reduced or zero LAANC ceiling
@@ -176,11 +187,12 @@ steel advisory airspace; white aircraft) — green/red is reserved for the verdi
 
 ---
 
-## Range rings (fixed, GPS-centred — same on every device)
+## Range zones (fixed, GPS-centred — same on every device)
 
-| Ring | Radius | Role |
+| Zone | Radius | Role |
 |---|---|---|
-| **Operational** | 1 mi | FAA point query · the one ring aircraft are assessed in — an in-ring plane caps the chart, or **grounds it → red** at ≤ 500 ft AGL (drone stays 500 ft below) |
+| **Overhead** | ~0.1 mi (`OVERHEAD_MI`) + inside-polygon | your position's column — LAANC cell ceiling, and whether you're **inside** a no-fly zone. Positional cap/ground |
+| **Operational** | 1 mi | the traffic ring — a manned plane < 900 ft AGL here caps the chart, or **grounds it → red** at ≤ 500 ft AGL. Also the radius for in-ring awareness cards |
 | **Data** | 25 mi | everything pulled + carded on the SITREP |
 
 ---
@@ -190,7 +202,8 @@ steel advisory airspace; white aircraft) — green/red is reserved for the verdi
 | Const | Value | Meaning |
 |---|---|---|
 | `REFRESH_S` | 5 s | master pulse cadence |
-| `RED_MI / DATA_MI` | 1 / 25 mi | operational / data radii |
+| `OVERHEAD_MI` | 0.1 mi | LAANC ceiling query box (~530 ft) — your cell + a GPS buffer |
+| `RED_MI / DATA_MI` | 1 / 25 mi | operational (traffic) / data radii |
 | `SPEC.regFt` | 400 ft | Part 107 ceiling |
 | `SPEC.clrFt` | 500 ft | cloud clearance (fly this far below) |
 | `SPEC.visSM` | 3 SM | min visibility |

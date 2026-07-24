@@ -254,18 +254,6 @@ async function rmhiqFC(bbox,layers,timeout){   // bbox query → FeatureCollecti
   if(fc.truncated) throw new Error('rmhiq airspace result truncated');   // a clipped listing must not read as complete coverage
   return fc;
 }
-let _rmhiqCat=null,_rmhiqCatAt=0;
-const RMHIQ_CAT_TTL=5*60*1000;   // catalog reuse — freshness flags move on the hub's own pulses
-async function rmhiqFresh(id){   // hub catalog freshness for one source; an unknown source reads NOT fresh
-  if(!_rmhiqCat||Date.now()-_rmhiqCatAt>=RMHIQ_CAT_TTL){
-    const j=await getJSON(`${RMHIQ}/api`,{timeout:7000});
-    if(!Array.isArray(j.sources)) throw new Error('rmhiq catalog failed');
-    _rmhiqCat=j.sources; _rmhiqCatAt=Date.now();
-  }
-  const s=_rmhiqCat.find(x=>x.id===id);
-  return !!(s&&s.fresh);
-}
-
 window.__sitrep={};   // debug/test handle (modules attach as the app wires up)
 
 // 1. data feeds — {id, refresh[s], viewport?, loader → GeoJSON FC (null = keep current)}; features are
@@ -535,7 +523,7 @@ const CATS=[
   {src:'airspace', hazard:true, filter:f=>f.properties.sev==='hard'||f.properties.sev==='caution',   // restrictions that gate a drone
    icon:f=>({DEF:'🛡️',NSUFR:'🔒',P:'⛔',STDM:'🏟️',R:'⚠️'}[f.properties.cls]
      ||(f.properties.sev==='hard'?'⛔':'⚠️')),
-   cls:(f,inside)=>(f.properties.cls==='DEF'||(inside&&f.properties.sev==='hard'))?'danger':'',   // red INSIDE a hard zone (PROH/NSUFR ground) or anywhere in the 1 mi ring for a defense TFR (the FAA gate grounds on it); conditional R/STDM + near = neutral
+   cls:(f,inside)=>(inside&&f.properties.sev==='hard')?'danger':'',   // red only when you're INSIDE a hard zone (PROH/NSUFR/DEF ground overhead, not from nearby); conditional R/STDM + near = neutral awareness
    head:f=>({DEF:'DEFENSE AIRSPACE',NSUFR:'SECURITY NO-FLY',P:'PROHIBITED AREA',R:'RESTRICTED AREA',
      STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
@@ -860,7 +848,7 @@ async function getLaancCeil(lat,lon,rng){
   for(const f of fc.features){
     const c=f.properties&&f.properties.CEILING;   // the hub stores no UNIT — it's the constant "Feet"
     if(!Number.isFinite(c)||c<0||c>10000) throw new Error('laanc cell has no usable ceiling');
-    ceil=Math.min(ceil,c);   // worst grid cell in range wins
+    ceil=Math.min(ceil,c);   // worst cell in the tight overhead box wins (your cell + a GPS buffer)
   }
   return {ceilFt:ceil};
 }
@@ -874,14 +862,9 @@ async function getLaancCeilFAA(lat,lon,rng){   // direct-FAA fallback — self-r
     const c=(a&&typeof a.CEILING==='number')?a.CEILING:NaN;
     if(!Number.isFinite(c)||c<0||c>10000) throw new Error('airspace cell has no usable ceiling');
     if(a.UNIT!=null&&!/^f/i.test(String(a.UNIT))) throw new Error('airspace ceiling in unexpected units');
-    ceil=Math.min(ceil,c);   // worst grid cell in range wins
+    ceil=Math.min(ceil,c);   // worst cell in the tight overhead box wins (your cell + a GPS buffer)
   }
   return {ceilFt:ceil};
-}
-async function getDefense(lat,lon,rng){
-  if(!(await rmhiqFresh('asp-defense-tfr'))) throw new Error('rmhiq defense-tfr source stale');   // a hub that can't reach FAA must not read "no TFR"
-  const fc=await rmhiqFC(ptEnv(lat,lon,rng),'asp-defense-tfr',7000);
-  return {active:fc.features.length>0};
 }
 function makeProfile(pts){   // wind(ft) → mph, linearly interpolating the sparse model levels
   const p=(pts||[]).filter(x=>x&&x.w!=null&&!isNaN(x.w)).sort((a,b)=>a.h-b.h);
@@ -894,13 +877,11 @@ function makeProfile(pts){   // wind(ft) → mph, linearly interpolating the spa
     return p[p.length-1].w;
   };
 }
-// airspace caches — LAANC persisted 6 h (near-static, rate-limited service); defense TFR in-memory ~10 min
-// (time-sensitive — a TFR appearing while parked must be caught). Position match = ASP_TOL_MI.
+// LAANC cache — persisted 6 h (near-static, rate-limited service). Position match = ASP_TOL_MI.
+const OVERHEAD_MI=0.1;   // FAA/LAANC ceiling is read in this tight box around your position (~530 ft, a GPS-error buffer) — your cell, not the worst cell within a mile
 const ASP_CACHE_KEY='canifly.asp';
 const ASP_TTL=6*60*60*1000, ASP_HARD_TTL=24*60*60*1000;   // fresh TTL · fallback-when-failing TTL
-const DEF_TTL=10*60*1000, DEF_HARD_TTL=60*60*1000;
-let aspCache=null;   // {lat,lon,rng,ceilFt,ts} — GRID-only ceiling (an old defense-forced 0 reads conservative, ages out ≤24 h)
-let defCache=null;   // {lat,lon,rng,active,ts} — in-memory only, short-lived by design
+let aspCache=null;   // {lat,lon,rng,ceilFt,ts} — your-cell LAANC ceiling (defense TFRs ground via flyRestriction now, not here)
 function hydrateAsp(){   // restore the persisted LAANC cache (validated, hard-TTL-bounded)
   try{ const s=JSON.parse(localStorage.getItem(ASP_CACHE_KEY)||'null');
     if(s&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&Number.isFinite(s.rng)
@@ -952,11 +933,11 @@ const layerTier=id=>{ const st=LAYER_STATE[id]||{}; return feedTier(true, st.fai
 function flyNeverVerified(){ return Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='red'); }   // any required gate never verified
 window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // debug/test handle
 
-function flyRestriction(){   // hard zone UNDER you (PROH/NSUF/NPS; DEF excluded — the FAA cap grounds those)
+function flyRestriction(){   // hard zone directly UNDER you (PROH/NSUFR/DEF/NPS) — grounds only when you're INSIDE it, matching "fly straight up next to it, not over it"
   const c={lat:USER.lat,lng:USER.lon}; let hit=null;
   featsIn('airspace').forEach(f=>{
     const p=f.properties;
-    if(hit||p.sev!=='hard'||p.cls==='DEF') return;
+    if(hit||p.sev!=='hard') return;
     if(pointInFeature(f,c.lng,c.lat)) hit={code:p.code,name:p.name};
   });
   if(!hit) featsIn('nps').forEach(f=>{   // park land is a hard no-fly too
@@ -1092,23 +1073,17 @@ async function flyRefresh(){
   const myGen=++flyGen;   // generation token — a stall-superseded cycle must not write stale gates over fresh ones
   try{
     const base={lat:USER.lat,lon:USER.lon};
-    const rngMi=RNG.mi;   // snapshot — the radius can't shift mid-fetch
     if(aspCache==null) hydrateAsp();
     const cc=aspCache;
-    const matches=cc!=null&&cc.rng===rngMi&&havMi(base.lat,base.lon,cc.lat,cc.lon)<ASP_TOL_MI;   // LAANC cache position match
+    const matches=cc!=null&&cc.rng===OVERHEAD_MI&&havMi(base.lat,base.lon,cc.lat,cc.lon)<ASP_TOL_MI;   // LAANC cache position match
     const age=cc!=null?Date.now()-cc.ts:Infinity;
     const fresh=matches&&age<ASP_TTL;
-    const dc=defCache;   // defense cache — same match logic, much shorter window
-    const defMatches=dc!=null&&dc.rng===rngMi&&havMi(base.lat,base.lon,dc.lat,dc.lon)<ASP_TOL_MI;
-    const defAge=dc!=null?Date.now()-dc.ts:Infinity;
-    const defFresh=defMatches&&defAge<DEF_TTL;
     const kpKeep=FLY.data!=null&&FLY.data.kp!=null&&Date.now()-flyKpAt<170000;   // Kp self-throttle ~3 min
     const aloftKeep=FLY.data!=null&&FLY.data.aloft!=null&&Date.now()-flyAloftAt<ALOFT_TTL_MS
       &&havMi(FLY.data.lat,FLY.data.lon,base.lat,base.lon)<ASP_TOL_MI;   // reuse in-hand columns while fresh for this spot
     const pAloft = aloftKeep?Promise.resolve(FLY.data.aloft):retry(()=>getAloft(base.lat,base.lon),2).catch(()=>null);   // all inputs fire in parallel
     const pKp    = kpKeep?Promise.resolve(FLY.data.kp):retry(()=>getKp(),2).catch(()=>null);
-    const pGrid  = fresh?Promise.resolve({ceilFt:cc.ceilFt}):retry(()=>getLaancCeil(base.lat,base.lon,rngMi),2).catch(()=>null);   // the legal gate deserves the same 2 tries as everything else
-    const pDef   = defFresh?Promise.resolve({active:dc.active}):retry(()=>getDefense(base.lat,base.lon,rngMi),2).catch(()=>null);
+    const pGrid  = fresh?Promise.resolve({ceilFt:cc.ceilFt}):retry(()=>getLaancCeil(base.lat,base.lon,OVERHEAD_MI),2).catch(()=>null);   // the legal gate deserves the same 2 tries as everything else
 
     const aloft=await pAloft;   // weather first — paint with last-good gates rather than wait on the slow FAA query
     if(myGen!==flyGen) return;   // superseded by a stall takeover — drop this cycle's writes
@@ -1121,19 +1096,16 @@ async function flyRefresh(){
       FLY.err.om=true;   // weather pull failed — keep the stale grid; next pulse retries
     }
 
-    const [kpRaw,gridRaw,defRaw]=await Promise.all([pKp,pGrid,pDef]);
+    const [kpRaw,gridRaw]=await Promise.all([pKp,pGrid]);
     if(myGen!==flyGen) return;   // superseded mid-flight — a newer cycle owns the gates now
     if(!aloftKeep&&aloft!=null) flyAloftAt=Date.now();   // fresh pulls reset their clocks
     if(!kpKeep&&kpRaw!=null) flyKpAt=Date.now();
     let kp=kpRaw;
     if(kp==null&&FLY.data&&FLY.data.kp!=null&&Date.now()-flyKpAt<KP_STALE_MS) kp=FLY.data.kp;   // Kp blip → recent last-good; beyond that stays null (unknown ≠ calm)
     let gridRes=gridRaw;
-    if(gridRes!=null){ if(!fresh){ aspCache={lat:base.lat,lon:base.lon,rng:rngMi,ceilFt:gridRes.ceilFt,ts:Date.now()}; persistAsp(); } }
+    if(gridRes!=null){ if(!fresh){ aspCache={lat:base.lat,lon:base.lon,rng:OVERHEAD_MI,ceilFt:gridRes.ceilFt,ts:Date.now()}; persistAsp(); } }
     else if(matches&&age<ASP_HARD_TTL) gridRes={ceilFt:cc.ceilFt};   // failed refetch → matching cache within hard TTL
-    let defRes=defRaw;
-    if(defRes!=null){ if(!defFresh) defCache={lat:base.lat,lon:base.lon,rng:rngMi,active:defRes.active,ts:Date.now()}; }
-    else if(defMatches&&defAge<DEF_HARD_TTL) defRes={active:dc.active};
-    const asp=(gridRes!=null&&defRes!=null)?{ceilFt:defRes.active?0:gridRes.ceilFt}:null;   // known only when BOTH halves are; defense forces 0
+    const asp=(gridRes!=null)?{ceilFt:gridRes.ceilFt}:null;   // your-cell LAANC ceiling; defense TFRs ground via flyRestriction now, not here
     if(aloft){
       FLY.data={lat:base.lat,lon:base.lon,aloft,kp,asp};
       FLY.err.om=false; FLY.err.asp=asp==null;
