@@ -160,10 +160,12 @@ express: a required feed that never verified, or no GPS fix. The clock stays whi
 
 | # | Category | Contents | Sort |
 |---|---|---|---|
-| 1 | Red no-go | any aircraft < 900 ft AGL in the 1 mi ring · INSIDE hard airspace / NPS · required feed not loaded | by range |
-| 2 | General | everything else < 25 mi — aircraft · airspace · zones nearby (incl. hard) · restricted/stadium · weak-GPS & stale-feed notices — interleaved, neutral | by range |
+| 1 | Red no-go | **anything that caps or grounds you within 1 mi** — aircraft < 900 ft AGL · INSIDE a hard zone / NPS · a defense TFR in the ring · controlled airspace where LAANC caps or grounds you — plus a required feed not loaded | by range |
+| 2 | General | everything else < 25 mi — aircraft · advisory/near airspace · restricted/stadium · controlled airspace at a full ceiling · weak-GPS & stale-feed notices — interleaved, neutral | by range |
 
-With **no GPS fix** the SITREP is a single red **NO GPS FIX** card and nothing else.
+**A card is red exactly when its subject caps or grounds you inside the 1 mi ring** — the same
+conditions that ground the chart. Everything else is neutral identity. (Weather/Kp and FAA ceiling
+have no card at all.) With **no GPS fix** the SITREP is a single red **NO GPS FIX** card and nothing else.
 
 Weather and space-weather gates (gust · vis · wind · cloud · Kp) have **no card** — they live only
 on the chart (reason codes) and in the verdict. FAA ceiling likewise: a reduced or zero LAANC ceiling

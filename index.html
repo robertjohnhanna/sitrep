@@ -535,7 +535,7 @@ const CATS=[
   {src:'airspace', hazard:true, filter:f=>f.properties.sev==='hard'||f.properties.sev==='caution',   // restrictions that gate a drone
    icon:f=>({DEF:'🛡️',NSUFR:'🔒',P:'⛔',STDM:'🏟️',R:'⚠️'}[f.properties.cls]
      ||(f.properties.sev==='hard'?'⛔':'⚠️')),
-   cls:(f,inside)=>(inside&&f.properties.sev==='hard')?'danger':'',   // red only INSIDE a hard zone (chart grounds too); near = neutral info
+   cls:(f,inside)=>(f.properties.cls==='DEF'||(inside&&f.properties.sev==='hard'))?'danger':'',   // red INSIDE a hard zone (PROH/NSUFR ground) or anywhere in the 1 mi ring for a defense TFR (the FAA gate grounds on it); conditional R/STDM + near = neutral
    head:f=>({DEF:'DEFENSE AIRSPACE',NSUFR:'SECURITY NO-FLY',P:'PROHIBITED AREA',R:'RESTRICTED AREA',
      STDM:'STADIUM TFR'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
@@ -544,7 +544,9 @@ const CATS=[
   {src:'airspace', hazard:false, filter:f=>f.properties.sev==='advisory', icon:'🎯', cls:()=>'',   // MOA/W/A/D — awareness, not a drone no-fly
    head:f=>({MOA:'MILITARY OPS AREA',W:'WARNING AREA',A:'ALERT AREA',D:'DANGER AREA'}[f.properties.cls]||'SPECIAL-USE AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26), detail:()=>'advisory only'},
-  {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl', icon:'🗼', cls:()=>'',   // controlled B/C/D+E2 — fly WITH LAANC; the FAA CEILING card carries the real severity
+  {src:'airspace', hazard:false, ctrl:true, filter:f=>f.properties.sev==='ctrl', icon:'🗼',   // controlled B/C/D+E2 — fly WITH LAANC
+   cls:(f,inside)=>{ const d=FLY.detail;   // red when you're INSIDE it and LAANC caps or grounds you (aspCapFt < 400) — matches the chart's FAA code; a full 400 ceiling stays neutral
+     return (inside && d && !d.aspUnknown && d.aspCapFt<SPEC.regFt) ? 'danger':''; },
    head:f=>({B:'CLASS B AIRSPACE',C:'CLASS C AIRSPACE',D:'CLASS D AIRSPACE',E:'CLASS E AIRSPACE'}[f.properties.cls]||'AIRSPACE'),
    sub:f=>cut(f.properties.name||'—',26),
    detail:()=>'authorization (LAANC)'},
@@ -663,7 +665,7 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
         +(idTxt&&idTxt!=='unknown'?' · '+idTxt:'');   // skip a bare "unknown" — it adds nothing
       det=bi.label;   // '254 ft AGL'
     }
-    const hazard=hazardOv!=null?hazardOv:cfg.hazard;   // override tiers the card as a warning
+    const hazard=cls==='danger'?true:(hazardOv!=null?hazardOv:cfg.hazard);   // any red (no-go) card ranks at the top, even from a hazard:false source (controlled airspace)
     const tier=hazard?(cls==='danger'?0:1):2;
     let pt, mi;
     if(g.type==='Point'){ pt=g.coordinates; mi=havMi(lat,lon,pt[1],pt[0]); }
