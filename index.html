@@ -622,13 +622,13 @@ function sitrepTick(){   // fully synchronous — reads only already-loaded stat
 
   // DATA HEALTH (pinned) — feeds classified by the ONE feedTier() rule
   const redFeeds=[], staleFeeds=[];
-  for(const [k,label] of [['om','weather'],['asp','FAA airspace'],['kp','Kp']]){
-    let tier=gateTier(k);
-    if(k==='asp' && !tier && layerTier('airspace')==='stale') tier='stale';   // the heavier listing feed rides the same label
-    if(tier==='red') redFeeds.push(label); else if(tier==='stale') staleFeeds.push(label);
-  }
-  if(layerTier('nps')==='stale') staleFeeds.push('NPS');   // a failing NPS feed degrades the park no-fly check
-  const acSt=LAYER_STATE.nearair;   // aircraft = traffic, not a gate: only ever stale, never red
+  const worstTier=(...t)=>t.includes('red')?'red':t.includes('stale')?'stale':null;
+  const pushFeed=(tier,label)=>{ if(tier==='red') redFeeds.push(label); else if(tier==='stale') staleFeeds.push(label); };
+  pushFeed(gateTier('om'),'weather');
+  pushFeed(worstTier(gateTier('asp'),layerTier('airspace')),'FAA airspace');   // the LAANC ceiling gate + the airspace listing share one label — worst wins
+  pushFeed(gateTier('kp'),'Kp');
+  pushFeed(layerTier('nps'),'NPS');   // park data we've never loaded reds the no-fly check; a stale one just notes
+  const acSt=LAYER_STATE.nearair;   // aircraft = traffic, not a no-fly gate: only ever stale, never red
   if((acSt && acSt.started && !acSt.everLoaded && (acSt.features||[]).length===0)
      || layerTier('nearair')==='stale')
     staleFeeds.push('aircraft');
@@ -907,7 +907,8 @@ const flyEver={om:false,asp:false,kp:false};    // ever loaded, per chart gate
 const flyErrSince={om:0,asp:0,kp:0};            // failing since, per chart gate
 const FLY_ERR_LABEL={om:'weather',asp:'FAA airspace',kp:'Kp'};
 const gateTier=k=>feedTier(flyEver[k], FLY.err[k], flyErrSince[k]);
-const layerTier=id=>{ const st=LAYER_STATE[id]||{}; return feedTier(true, st.failSince>0, st.failSince); };   // listing feeds only ever go stale — their startup is covered by the matching gate
+const layerTier=id=>{ const st=LAYER_STATE[id]||{};   // a listing that has NEVER loaded this session reads RED (grounds — unknown ≠ clear); once loaded, only healthy/stale
+  return !st.everLoaded ? 'red' : feedTier(true, st.failSince>0, st.failSince); };
 function flyNeverVerified(){ return Object.keys(FLY_ERR_LABEL).some(k=>gateTier(k)==='red'); }   // any required gate never verified
 window.__sitrep.fly={FLY,SPEC,LIM,RNG,paint:flyPaint,refresh:flyRefresh};   // debug/test handle
 
@@ -1114,7 +1115,7 @@ function evalGates(tr){   // tr = the shared assessTraffic() result, so gate and
   const capSev=c=>c!=null&&c<0?2:0;   // ceiling → severity: only a grounding cap (< 0) scores; a reduced-but-flyable ceiling doesn't (binary — no caution)
   const g={};
   g.gps=USER.lat==null?2:0;   // no fix = nothing briefable; any committed fix flies (no poor-accuracy caution)
-  g.data=flyNeverVerified()?2:0;   // a required feed never verified grounds (unknown ≠ clear); stale-but-once-loaded no longer votes — last-good keeps painting, the DATA card still surfaces it
+  g.data=(flyNeverVerified()||layerTier('airspace')==='red'||layerTier('nps')==='red')?2:0;   // required feed never verified grounds (unknown ≠ clear): the chart gates PLUS the airspace/NPS listings — with no listing we can't say you're clear of a no-fly zone. stale-but-once-loaded doesn't vote (last-good paints)
   g.gust=wn&&wn.gust?2:0;                      // weather gates — the same NOW values the chart paints
   g.vis =wn&&wn.vis?2:0;
   g.wind=wn?capSev(wn.windCeilFt):0;

@@ -157,7 +157,7 @@ Cards display a gate's info and rank by its severity, but never vote.
 | Severity | Color | Meaning | Gates that score it |
 |---|---|---|---|
 | 0 | 🟢 green | GO | nothing grounds — including everything that used to caution: a reduced ceiling, a plane that only caps, a zone nearby, poor GPS, a stale-but-last-good feed |
-| 2 | 🔴 red | NO-GO | **a grounding chart gate** — gust · vis · Kp G3+ · FAA no-fly · in-ring plane ≤ 500 ft AGL · inside a prohibited / security / park zone (the NOW column reds with each) — **plus** what the chart can't show: required feed never verified · no GPS fix |
+| 2 | 🔴 red | NO-GO | **a grounding chart gate** — gust · vis · Kp G3+ · FAA no-fly · in-ring plane ≤ 500 ft AGL · inside a prohibited / security / defense TFR / park zone (the NOW column reds with each) — **plus** what the chart can't show: a required feed never loaded (weather · LAANC · Kp · **airspace listing · NPS**) · no GPS fix |
 
 Altitude gates score from the very values the chart paints, so the NOW color never reads
 no-go over flyable green cells. A gate reaches beyond the chart only for what the chart can't
