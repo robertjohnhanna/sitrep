@@ -17,7 +17,7 @@ decided.** For reference only.
 flowchart LR
   GPS["GPS watch — watchPosition<br/>→ USER lat / lon / acc"] --> PULSE["pulse() every 5 s → FETCH (keyless, CORS-open)<br/>aircraft · airspace + NPS (rmhiq hub)<br/>winds-aloft · Kp · elevation"]
   PULSE --> STORE[("STORE<br/>LAYER_STATE[id].features<br/>FLY.data")]
-  STORE --> GATES["evalGates()<br/>→ gate table (0/1/2)"]
+  STORE --> GATES["evalGates()<br/>→ gate table (0/2)"]
   STORE --> CHART["flyComputeDetail()<br/>→ can-I-fly grid"]
   STORE --> SITREP["sitrepTick()<br/>→ SITREP cards"]
   GATES --> NOW["verdict = max(gates)<br/>→ NOW header color"]
@@ -26,8 +26,8 @@ flowchart LR
 ```
 
 **Verdict logic lives in ONE place — the gate table.** `evalGates()` scores every condition
-that can color the verdict, exactly once (0 clear · 1 caution · 2 no-go); the verdict is a
-pure `max()` fold over it. Everything else is a view: `flyComputeDetail()` projects the
+that can color the verdict, exactly once (0 clear · 2 no-go — **binary, no caution tier**);
+the verdict is a pure `max()` fold over it. Everything else is a view: `flyComputeDetail()` projects the
 ceiling gates onto the altitude × hour chart, `sitrepTick()` renders cards (info + ranking —
 a card never votes), and `assessTraffic()` is the one traffic assessment they all share.
 
@@ -120,8 +120,10 @@ grounded  ⇢  capFt < 0   OR   any grounding gate below
 | **Kp** | SWPC Kp | ≥ 7 (G3+) | grounds |
 | **Restriction** | prohibited · security · NPS **under you** | inside the zone | grounds all hours |
 
-The cells are strictly binary — **no yellow ever lives in the grid**. Softer conditions
-(a plane that only caps, an unverified feed, poor GPS) color the **verdict** alone, below.
+The cells are strictly binary — green fly / red can't — and **so is the verdict below**: there
+is no caution tier. A condition either grounds you (red no-go) or it doesn't (green go). Softer
+conditions (a plane that only caps, a reduced ceiling, an unverified-but-last-good feed) still
+surface as neutral SITREP cards and as chart caps, but they no longer color the verdict.
 
 **Method notes.** Traffic AGL = QNH-corrected ADS-B pressure altitude − ground elevation
 **under that plane** (cached ~0.7 mi cells; unknown terrain fails toward *not* flagging).
@@ -130,28 +132,27 @@ rising storm shows in the estimate first). Cloud base = the lowest pressure deck
 ≥12% cover, min'd with an LCL estimate from the temp/dew-point spread.
 
 **Unknown ≠ clear** (`feedTier()`, one classifier for every feed): a required feed that has
-**never loaded** grounds the verdict (red) immediately — no grace; a feed that *was* loaded
-and fails past a ~35 s grace window cautions (yellow). The verdict and the DATA card change
-color together, and last-good data keeps painting throughout.
+**never loaded** grounds the verdict (red) immediately — no grace. A feed that *was* loaded
+and then fails past a ~35 s grace window no longer changes the verdict — last-good data keeps
+painting — and surfaces only as a neutral **DATA UNVERIFIED** card so the gap stays visible.
 
 ---
 
 ## Verdict color (NOW column header)
 
 `verdictSeverity = max` over the **gate table** (`evalGates()`) — the single point of
-verdict logic. Each gate scores 0/1/2; cards display a gate's info and rank by its
-severity, but never vote.
+verdict logic. The verdict is **binary**: each gate scores 0 or 2, nothing scores caution.
+Cards display a gate's info and rank by its severity, but never vote.
 
 | Severity | Color | Meaning | Gates that score it |
 |---|---|---|---|
-| 0 | 🟢 green | GO | nothing scores |
-| 1 | 🟡 yellow | CAUTION | reduced ceiling < 400 (FAA / wind aloft / cloud) · a plane that caps (in the ring) or any low plane out to 5 mi · a zone nearby (incl. hard) · poor GPS · stale feed |
+| 0 | 🟢 green | GO | nothing grounds — including everything that used to caution: a reduced ceiling, a plane that only caps, a zone nearby, poor GPS, a stale-but-last-good feed |
 | 2 | 🔴 red | NO-GO | **a grounding chart gate** — gust · vis · Kp G3+ · FAA no-fly · in-ring plane ≤ 500 ft AGL · inside a prohibited / security / park zone (the NOW column reds with each) — **plus** what the chart can't show: required feed never verified · no GPS fix |
 
 Altitude gates score from the very values the chart paints, so the NOW color never reads
-no-go over flyable green cells. A gate exceeds the chart's own state only for conditions the
-chart can't express (a nearby zone, GPS, data health). The clock stays
-white; the **NOW column header** carries the color. All times shown are device-local.
+no-go over flyable green cells. A gate reaches beyond the chart only for what the chart can't
+express: a required feed that never verified, or no GPS fix. The clock stays white; the
+**NOW column header** carries the color. All times shown are device-local.
 
 ---
 
@@ -159,12 +160,11 @@ white; the **NOW column header** carries the color. All times shown are device-l
 
 | # | Category | Contents | Sort |
 |---|---|---|---|
-| 1 | Red warning | grounding aircraft (≤ 500 ft AGL in the 1 mi ring) · INSIDE hard airspace / NPS · FAA no-fly · Kp G3+ · required feed not loaded | by range |
-| 2 | Yellow alert | low aircraft (capping, or out to 5 mi) · zones nearby (incl. hard) · restricted/stadium · FAA reduced ceiling · stale feed | by range |
-| 3 | General | every non-promoted object < 25 mi — aircraft + airspace, interleaved | by range |
+| 1 | Red no-go | grounding aircraft (≤ 500 ft AGL in the 1 mi ring) · INSIDE hard airspace / NPS · FAA no-fly · Kp G3+ · required feed not loaded | by range |
+| 2 | General | everything else < 25 mi — aircraft · airspace · zones nearby (incl. hard) · restricted/stadium · FAA reduced ceiling · stale-feed notice — interleaved, neutral | by range |
 
 Object colors are **identity only** (violet no-fly · cyan conditional · blue/magenta controlled ·
-steel advisory airspace; white aircraft) — green/yellow/red is reserved for the verdict.
+steel advisory airspace; white aircraft) — green/red is reserved for the verdict.
 
 ---
 
@@ -172,8 +172,7 @@ steel advisory airspace; white aircraft) — green/yellow/red is reserved for th
 
 | Ring | Radius | Role |
 |---|---|---|
-| **Operational** (red) | 1 mi | FAA point query · traffic caps the chart · low-aircraft **grounds → red** (≤ 500 ft AGL) else caps → yellow |
-| **Buffer** (yellow) | 5 mi | traffic net · any low aircraft → **yellow** heads-up |
+| **Operational** | 1 mi | FAA point query · the one ring aircraft are assessed in — an in-ring plane caps the chart, or **grounds it → red** at ≤ 500 ft AGL (drone stays 500 ft below) |
 | **Data** | 25 mi | everything pulled + carded on the SITREP |
 
 ---
@@ -183,11 +182,10 @@ steel advisory airspace; white aircraft) — green/yellow/red is reserved for th
 | Const | Value | Meaning |
 |---|---|---|
 | `REFRESH_S` | 5 s | master pulse cadence |
-| `RED_MI / BUFFER_MI / DATA_MI` | 1 / 5 / 25 mi | operational / buffer / data radii |
+| `RED_MI / DATA_MI` | 1 / 25 mi | operational / data radii |
 | `SPEC.regFt` | 400 ft | Part 107 ceiling |
 | `SPEC.clrFt` | 500 ft | cloud clearance (fly this far below) |
 | `SPEC.visSM` | 3 SM | min visibility |
-| `SPEC.kpGnd` | 7 | Kp ground (no caution tier — Kp only ever grounds) |
+| `SPEC.kpGnd` | 7 | Kp ground (Kp only ever grounds) |
 | `LIM.wind` | 27 mph | max wind/gust |
-| `WARN_AGL_FT` | 900 ft | low-aircraft alert altitude (400 + 500 sep) |
-| `ACC_WARN_M` | ~164 ft (50 m) | GPS accuracy worse than this → yellow (the browser reports accuracy in metres) |
+| `WARN_AGL_FT` | 900 ft | low-aircraft altitude threshold — a manned plane below this in the ring caps or grounds the chart (400 + 500 sep) |
