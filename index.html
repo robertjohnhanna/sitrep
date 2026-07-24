@@ -160,7 +160,7 @@ const ADSB_HOSTS=[
   {point:(la,lo,r)=>`https://opendata.adsb.fi/api/v2/lat/${la}/lon/${lo}/dist/${r}`, list:j=>j.aircraft||[]},
 ];
 const MI_TO_NM=0.868976, ADSB_MAX_NM=100;   // point radii are NAUTICAL miles (the aviation unit) — the only NM in the app
-function adsbRadiusNm(){   // pull radius = the DATA ring; 15 nm floor keeps margin over the 1 mi ring, 100 nm guard cap
+function adsbRadiusNm(){   // pull radius = max(DATA ring, 15 nm floor) — at a 10 mi ring the 15 nm floor binds, keeping margin over the 1 mi ring; 100 nm guard cap
   return Math.min(ADSB_MAX_NM,Math.max(15,Math.ceil(DATA_MI*MI_TO_NM)));
 }
 function adsbMerge(lists){   // union of both feeds keyed on icao24 (`hex`) — for a duplicate the NEWEST report wins
@@ -745,7 +745,7 @@ const WARN_AGL_FT=SPEC.regFt+FAA_SEP_FT;   // 900 ft AGL — a plane below this 
 const LIM={wind:27};   // aircraft max wind [mph] — gates surface gust + caps the wind-aloft scan
 const RED_MI=1;   // operational ring — the one ring aircraft + point queries use (see README ring table)
 const RNG={mi:RED_MI};
-const DATA_MI=25;   // data ring — everything inside is pulled + carded, fixed on every device
+const DATA_MI=10;   // data ring — everything inside is pulled + carded, fixed on every device (10 not 25: less to fetch per pulse)
 const ALTS_UP=(()=>{const a=[];for(let f=0;f<=SPEC.regFt;f+=50)a.push(f);return a;})();   // 50 ft ladder, ascending
 const ALTS=[...ALTS_UP].reverse();   // …and descending (grid row order)
 const FC_HOURS=3;   // forecast columns beyond NOW

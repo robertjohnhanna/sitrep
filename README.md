@@ -37,9 +37,9 @@ a card never votes), and `assessTraffic()` is the one traffic assessment they al
 
 | Feed / call | Endpoint | Provides | Scope | Refresh |
 |---|---|---|---|---|
-| `nearair` | airplanes.live `/point/…` **+** adsb.fi `/lat/…/dist/…` (own route + shape each) — both queried every pull, contacts **merged by icao24/hex, newest report wins** | ALL aircraft (civil + military, no distinction) | ~25 mi around you | 5 s |
-| `airspace` | rmhiq `/api/airspace` — ONE bbox call, layers `asp-class,asp-defense-tfr,asp-sua,asp-nsufr,asp-stadiums` | Class B/C/D+E2, TFR, SUA, NSUFR, stadiums | 25 mi box | 15 min + on move |
-| `nps` | rmhiq `/api/airspace` — layer `nps` | national-park lands (no-fly) | 25 mi box | on move |
+| `nearair` | airplanes.live `/point/…` **+** adsb.fi `/lat/…/dist/…` (own route + shape each) — both queried every pull, contacts **merged by icao24/hex, newest report wins** | ALL aircraft (civil + military, no distinction) | ~10 mi around you (15 nm floor) | 5 s |
+| `airspace` | rmhiq `/api/airspace` — ONE bbox call, layers `asp-class,asp-defense-tfr,asp-sua,asp-nsufr,asp-stadiums` | Class B/C/D+E2, TFR, SUA, NSUFR, stadiums | 10 mi box | 15 min + on move |
+| `nps` | rmhiq `/api/airspace` — layer `nps` | national-park lands (no-fly) | 10 mi box | on move |
 | `getAloft` | open-meteo `/v1/forecast` | winds to ~590 ft + gust + dir + cloud + vis (NOW..+3h) | point | ~15 s |
 | `getKp` | swpc.noaa.gov Kp forecast | planetary Kp (3-hr bins) | global | ~3 min |
 | `getLaancCeil` | **FAA UAS Facility Map** (ArcGIS, direct — no longer via rmhiq) | drone grid ceiling **at your cell** | ~0.1 mi box (`OVERHEAD_MI`) | cached 6 h |
@@ -77,13 +77,13 @@ unexpected units **throws** rather than reading "clear".
 
 **Movement refresh ladder** — a move refreshes each product once it exceeds that product's
 own tolerance, scaled to its spatial reach (deliberately *not* one distance for everything —
-a 1 mi point query goes stale per-foot faster than a 25 mi disk):
+a 1 mi point query goes stale per-foot faster than a 10 mi disk):
 
 | Move exceeds | Refreshes |
 |---|---|
 | **~160 ft** (`REAL_MOVE_MI`) | registers as real movement — the fix snaps instead of smoothing jitter |
 | **~530 ft** (`ASP_TOL_MI`) | the point products — FAA gate (LAANC) + winds aloft |
-| **0.5 mi** (`REFETCH_MOVE_MI`) | the 25 mi listing footprint (airspace / NPS) + an immediate aircraft pull |
+| **0.5 mi** (`REFETCH_MOVE_MI`) | the 10 mi listing footprint (airspace / NPS) + an immediate aircraft pull |
 
 Aircraft also re-pull every 5 s pulse regardless of movement.
 
@@ -171,7 +171,7 @@ express: a required feed that never verified, or no GPS fix. The clock stays whi
 | # | Category | Contents | Sort |
 |---|---|---|---|
 | 1 | Red no-go | **anything that caps or grounds you** — an *overhead* restriction (INSIDE a hard zone: prohibited / security / defense TFR / NPS · or controlled airspace where your LAANC cell caps/grounds) · an *in-ring* aircraft < 900 ft AGL — plus a required feed not loaded | by range |
-| 2 | General | everything else < 25 mi — aircraft · advisory/near airspace · restricted/stadium · a hard zone you're only *near* · controlled airspace at a full ceiling · weak-GPS & stale-feed notices — interleaved, neutral | by range |
+| 2 | General | everything else < 10 mi — aircraft · advisory/near airspace · restricted/stadium · a hard zone you're only *near* · controlled airspace at a full ceiling · weak-GPS & stale-feed notices — interleaved, neutral | by range |
 
 **A card is red exactly when its subject caps or grounds you** — the same conditions that ground the
 chart: an *overhead* restriction (your LAANC cell, or a no-fly zone you're inside) or an *in-ring*
@@ -194,7 +194,7 @@ steel advisory airspace; white aircraft) — green/red is reserved for the verdi
 |---|---|---|
 | **Overhead** | ~0.1 mi (`OVERHEAD_MI`) + inside-polygon | your position's column — LAANC cell ceiling, and whether you're **inside** a no-fly zone. Positional cap/ground |
 | **Operational** | 1 mi | the traffic ring — a manned plane < 900 ft AGL here caps the chart, or **grounds it → red** at ≤ 500 ft AGL. Also the radius for in-ring awareness cards |
-| **Data** | 25 mi | everything pulled + carded on the SITREP |
+| **Data** | 10 mi | everything pulled + carded on the SITREP |
 
 ---
 
@@ -204,7 +204,7 @@ steel advisory airspace; white aircraft) — green/red is reserved for the verdi
 |---|---|---|
 | `REFRESH_S` | 5 s | master pulse cadence |
 | `OVERHEAD_MI` | 0.1 mi | LAANC ceiling query box (~530 ft) — your cell + a GPS buffer |
-| `RED_MI / DATA_MI` | 1 / 25 mi | operational (traffic) / data radii |
+| `RED_MI / DATA_MI` | 1 / 10 mi | operational (traffic) / data radii |
 | `SPEC.regFt` | 400 ft | Part 107 ceiling |
 | `SPEC.clrFt` | 500 ft | cloud clearance (fly this far below) |
 | `SPEC.visSM` | 3 SM | min visibility |
